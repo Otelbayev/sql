@@ -1,0 +1,892 @@
+================================================================================
+                POSTGRESQL — PART 1 KONSPEKT
+                (Asoslar: database, schema, table, data types, constraints)
+================================================================================
+
+MUNDARIJA
+---------
+0.  Terminal / psql bilan ishlash (eng kerakli qism)
+1.  DATABASE — birinchi baza
+2.  SCHEMA va EXTENSION
+3.  Birinchi TABLE (jadval)
+4.  Asosiy DATA TYPES (ma'lumot turlari)
+5.  Boshqa DATA TYPES: UUID, JSONB
+6.  NULL vs '' (bo'sh satr) vs 0
+7.  CONSTRAINTS (cheklovlar)
+8.  PRIMARY KEY va SERIAL / IDENTITY
+9.  Foydali qo'shimchalar (part1 uchun bilish kerak)
+10. Tez-tez uchraydigan xatolar va yechimlari
+11. Cheat sheet (qisqa eslatma)
+
+
+================================================================================
+0. TERMINAL / PSQL BILAN ISHLASH
+================================================================================
+
+--- 0.1 O'rnatish (macOS) ---
+  brew install postgresql@16
+  brew services start postgresql@16      # serverni doimiy ishga tushirish
+  brew services stop postgresql@16       # to'xtatish
+  brew services restart postgresql@16    # qayta ishga tushirish
+  brew services list                     # holatini ko'rish
+
+  # PATH ga qo'shish (agar `psql: command not found` bo'lsa):
+  echo 'export PATH="/opt/homebrew/opt/postgresql@16/bin:$PATH"' >> ~/.zshrc
+  source ~/.zshrc
+
+  psql --version                         # versiyani tekshirish
+
+
+--- 0.2 psql ga kirish ---
+  psql postgres                          # default `postgres` bazasiga kirish
+  psql -U postgres -d mydb               # user va baza ko'rsatib
+  psql -U user -h localhost -p 5432 -d db  # to'liq shakl
+
+  Flaglar:
+    -U  user (foydalanuvchi)
+    -d  database (baza nomi)
+    -h  host (server manzili)
+    -p  port (default 5432)
+    -f  fayl (SQL faylni ishga tushirish)
+    -c  bitta komanda ishga tushirib chiqib ketish
+
+  Chiqish:  \q   yoki  Ctrl+D
+
+
+--- 0.3 psql META-KOMANDALARI (backslash komandalar) ---
+  BU ENG KERAKLI QISM. Bular SQL emas — psql ning o'z komandalari,
+  shuning uchun oxirida `;` shart emas.
+
+  \l          yoki \list         -> barcha bazalar ro'yxati
+  \c dbname                      -> boshqa bazaga ulanish (connect)
+  \c dbname username             -> user bilan ulanish
+
+  \dn                            -> schema'lar ro'yxati
+  \dt                            -> jadvallar (current schema)
+  \dt basics.*                   -> `basics` schemadagi jadvallar
+  \dt *.*                        -> barcha schemadagi jadvallar
+
+  \d tablename                   -> jadval strukturasi (ustunlar, tiplar)
+  \d+ tablename                  -> to'liqroq (hajmi, izohlar bilan)
+  \d basics.students             -> schema bilan birga
+
+  \du                            -> foydalanuvchilar (roles)
+  \dx                            -> o'rnatilgan extension'lar
+  \df                            -> funksiyalar
+  \di                            -> indekslar
+  \ds                            -> sequence'lar (SERIAL ular ustiga quriladi)
+
+  \x                             -> "expanded" rejim (uzun qatorlarni
+                                    vertikal ko'rsatadi). \x auto  — avtomatik
+  \timing                        -> har bir so'rov necha ms ishlaganini ko'rsat
+  \e                             -> oxirgi so'rovni editorda ochish
+  \i fayl.sql                    -> SQL faylni ishga tushirish
+  \o fayl.txt                    -> natijani faylga yozish (\o — o'chirish)
+  \conninfo                      -> hozir qayerga ulanganingni ko'rsatadi
+  \encoding                      -> kodlash
+  \?                             -> meta-komandalar yordami
+  \h CREATE TABLE                -> SQL komandasi bo'yicha yordam
+  \s                             -> komandalar tarixi
+
+
+--- 0.4 SQL FAYLNI TERMINALDAN ISHGA TUSHIRISH ---
+  # Tashqaridan:
+  psql -U postgres -d postgresql_part1 -f part1/03_first_table.sql
+
+  # psql ichidan:
+  \i /Users/none/Desktop/postgresql/part1/03_first_table.sql
+
+  # Bitta komandani ishga tushirish:
+  psql -U postgres -d postgresql_part1 -c "SELECT * FROM basics.students;"
+
+  MUHIM: 01_first_database.sql (CREATE DATABASE) `postgres` bazasiga
+  ulanib ishga tushiriladi, qolganlari esa `postgresql_part1` ga.
+  Ya'ni tartib:
+    1) psql -U postgres -d postgres  -f 01_first_database.sql
+    2) psql -U postgres -d postgresql_part1 -f 02_first_schema.sql
+    3) ... va hokazo
+
+
+--- 0.5 BOSHQA FOYDALI TERMINAL KOMANDALARI ---
+  createdb mydb                  -> baza yaratish (psql ga kirmasdan)
+  dropdb mydb                    -> bazani o'chirish
+  createuser -P myuser           -> user yaratish (parol so'raydi)
+
+  # Backup / Restore:
+  pg_dump -U postgres mydb > backup.sql            # butun baza
+  pg_dump -U postgres -t basics.students mydb > t.sql  # bitta jadval
+  psql -U postgres -d mydb < backup.sql             # tiklash
+
+  # Server ishlayaptimi?
+  pg_isready
+  lsof -i :5432                  # 5432 portni kim egallagan
+
+
+--- 0.6 PSQL ICHIDA XATOLARDAN CHIQISH ---
+  - Agar prompt `mydb=#` o'rniga `mydb-#` bo'lsa -> `;` qo'yilmagan.
+    Yechim: `;` yozib Enter, yoki Ctrl+C.
+  - Agar `mydb'#` yoki `mydb"#` bo'lsa -> qo'shtirnoq yopilmagan.
+  - `mydb=#`  -> normal holat, komanda kutmoqda
+  - `mydb=*#` -> ochiq tranzaksiya ichidasan (COMMIT / ROLLBACK kerak)
+
+
+================================================================================
+1. DATABASE — BIRINCHI BAZA
+================================================================================
+
+  DROP DATABASE IF EXISTS postgresql_part1;
+  CREATE DATABASE postgresql_part1;
+
+Tushunchalar:
+  - DATABASE — eng yuqori darajadagi konteyner. Ichida schema'lar,
+    ular ichida jadvallar bo'ladi.
+    Ierarxiya:  DATABASE  >  SCHEMA  >  TABLE  >  COLUMN / ROW
+
+  - `IF EXISTS` — agar baza mavjud bo'lmasa xato bermaydi, jim o'tadi.
+    Bu skriptni qayta-qayta ishga tushirish uchun juda qulay
+    (idempotent skript deyiladi).
+
+MUHIM QOIDALAR:
+  - CREATE DATABASE ni tranzaksiya ichida ishlatib bo'lmaydi.
+  - O'zing ulangan bazani DROP qila olmaysan. Boshqa bazaga o'tish kerak:
+      \c postgres
+      DROP DATABASE postgresql_part1;
+  - Agar boshqa ulanishlar bo'lsa xato beradi:
+      "database is being accessed by other users"
+    Yechim (PG13+):
+      DROP DATABASE postgresql_part1 WITH (FORCE);
+    yoki ulanishlarni uzish:
+      SELECT pg_terminate_backend(pid) FROM pg_stat_activity
+      WHERE datname = 'postgresql_part1' AND pid <> pg_backend_pid();
+
+
+================================================================================
+2. SCHEMA va EXTENSION
+================================================================================
+
+  CREATE SCHEMA IF NOT EXISTS basics;
+  CREATE EXTENSION IF NOT EXISTS pgcrypto;
+
+  SELECT schema_name
+  FROM information_schema.schemata
+  ORDER BY schema_name;
+
+--- SCHEMA nima? ---
+  Baza ichidagi "papka" (namespace). Jadvallarni mantiqan guruhlash uchun.
+  - Default schema — `public`. Agar schema yozmasang, `public` ga tushadi.
+  - To'liq nom:  schema.table  ->  basics.students
+
+--- search_path ---
+  Qaysi schema'larda avtomatik qidirishini belgilaydi:
+    SHOW search_path;                    -- default: "$user", public
+    SET search_path TO basics, public;   -- faqat shu sessiya uchun
+  Shundan keyin `SELECT * FROM students;` deb yozsa ham `basics.students` ni topadi.
+
+  Lekin O'RGANISH paytida har doim to'liq `basics.students` yozgan yaxshi —
+  chalkashlik bo'lmaydi.
+
+--- EXTENSION nima? ---
+  PostgreSQL ga qo'shimcha imkoniyat qo'shadigan modul.
+  - `pgcrypto` — kriptografiya funksiyalari beradi:
+      gen_random_uuid()  -> tasodifiy UUID (05-faylda ishlatilgan)
+      crypt(), digest()  -> parol hashlash
+  Eslatma: PostgreSQL 13+ da `gen_random_uuid()` ALLAQACHON yadroda bor,
+  pgcrypto shart emas. Lekin eski versiyalarda kerak bo'ladi.
+
+  Extension'larni ko'rish:  \dx
+  Mavjud extension'lar:     SELECT * FROM pg_available_extensions;
+
+--- information_schema ---
+  Standart SQL katalogi — baza haqidagi meta-ma'lumot:
+    information_schema.schemata  -> schema'lar
+    information_schema.tables    -> jadvallar
+    information_schema.columns   -> ustunlar
+
+  Misol — jadval ustunlarini ko'rish:
+    SELECT column_name, data_type, is_nullable, column_default
+    FROM information_schema.columns
+    WHERE table_schema = 'basics' AND table_name = 'students';
+
+
+================================================================================
+3. BIRINCHI TABLE (JADVAL)
+================================================================================
+
+  DROP TABLE IF EXISTS basics.students;
+
+  CREATE TABLE basics.students (
+      id         SERIAL PRIMARY KEY,
+      name       TEXT NOT NULL,
+      email      TEXT NOT NULL UNIQUE,
+      age        INTEGER CHECK (age >= 18),
+      created_at TIMESTAMP DEFAULT NOW()
+  );
+
+  INSERT INTO basics.students(name, email, age)
+  VALUES ('Jasurbek', 'jasurdev1604@gmail.com', 22),
+         ('None', 'none@gmail.com', 33);
+
+  SELECT * FROM basics.students;
+
+Har bir qatorning ma'nosi:
+  id SERIAL PRIMARY KEY
+      SERIAL      -> avtomatik o'suvchi butun son (1, 2, 3, ...)
+      PRIMARY KEY -> unikal + NOT NULL, qatorni identifikatsiya qiladi
+
+  name TEXT NOT NULL
+      bo'sh (NULL) bo'lishi mumkin emas
+
+  email TEXT NOT NULL UNIQUE
+      takrorlanmaydi + majburiy
+
+  age INTEGER CHECK (age >= 18)
+      18 dan kichik qiymat kiritib bo'lmaydi
+
+  created_at TIMESTAMP DEFAULT NOW()
+      kiritilmasa avtomatik hozirgi vaqt qo'yiladi
+
+--- INSERT sintaksisi ---
+  Bir nechta qatorni bitta INSERT bilan kiritish mumkin — vergul bilan.
+  Ustun nomlarini ko'rsatish TAVSIYA ETILADI:
+    INSERT INTO t (a, b) VALUES (1, 2);     -- yaxshi
+    INSERT INTO t VALUES (1, 2);            -- yomon (tartibga bog'liq)
+
+  Kiritilgan qatorni qaytarish:
+    INSERT INTO basics.students(name, email, age)
+    VALUES ('Ali', 'ali@mail.com', 20)
+    RETURNING id, created_at;
+
+--- DROP TABLE IF EXISTS ---
+  Skriptni qayta-qayta ishga tushirish uchun. Har safar toza jadval.
+  Ehtiyot bo'l: DROP butun jadvalni + ma'lumotni o'chiradi.
+  Faqat ma'lumotni tozalash uchun:
+    TRUNCATE basics.students;                    -- tez, hammasini o'chiradi
+    TRUNCATE basics.students RESTART IDENTITY;   -- id ni ham 1 dan boshlaydi
+    DELETE FROM basics.students;                 -- sekinroq, WHERE ishlatsa bo'ladi
+
+--- Jadvalni o'zgartirish (ALTER TABLE) ---
+  ALTER TABLE basics.students ADD COLUMN phone TEXT;
+  ALTER TABLE basics.students DROP COLUMN phone;
+  ALTER TABLE basics.students RENAME COLUMN name TO full_name;
+  ALTER TABLE basics.students ALTER COLUMN age SET NOT NULL;
+  ALTER TABLE basics.students ALTER COLUMN age DROP NOT NULL;
+  ALTER TABLE basics.students ALTER COLUMN age TYPE BIGINT;
+  ALTER TABLE basics.students RENAME TO pupils;
+
+
+================================================================================
+4. ASOSIY DATA TYPES (MA'LUMOT TURLARI)
+================================================================================
+
+  CREATE TABLE basics.products_basic (
+      id          SERIAL PRIMARY KEY,
+      name        VARCHAR(100) NOT NULL,
+      description TEXT,
+      stock       INTEGER DEFAULT 0,
+      total       BIGINT DEFAULT 0,
+      price       NUMERIC(10,2),
+      is_active   BOOLEAN DEFAULT true
+  );
+
+--- MATN (string) turlari ---
+  TEXT          -> cheksiz uzunlikdagi matn. PostgreSQL da ENG KO'P ishlatiladi.
+  VARCHAR(n)    -> maksimal n belgi. n dan oshsa XATO beradi.
+  CHAR(n)       -> qat'iy n belgi, qolgani probel bilan to'ldiriladi.
+                   Deyarli ishlatilmaydi — qochish kerak.
+
+  MUHIM: PostgreSQL da TEXT va VARCHAR TEZLIGI BIR XIL. VARCHAR(n)
+  faqat qo'shimcha uzunlik cheklovi qo'shadi, tezroq emas.
+  Qoida: agar biznes qoidasi bo'yicha uzunlik cheklovi kerak bo'lsa
+  VARCHAR(n), aks holda TEXT.
+
+--- BUTUN SON turlari ---
+  SMALLINT   2 bayt   -32,768 .. 32,767
+  INTEGER    4 bayt   -2,147,483,648 .. 2,147,483,647   (~2.1 mlrd)
+  BIGINT     8 bayt   -9.2 * 10^18 .. 9.2 * 10^18
+
+  Qoida: default INTEGER. Katta bo'lishi mumkin bo'lgan joyda (pul tiyinda,
+  hisoblagichlar, ID lar) BIGINT.
+
+--- O'NLIK / KASR turlari ---
+  NUMERIC(p, s)  yoki  DECIMAL(p, s)
+      p = precision (jami raqamlar soni)
+      s = scale (nuqtadan keyingi raqamlar soni)
+      NUMERIC(10,2) -> maks 10 ta raqam, shundan 2 tasi kasr qismi
+                       => maksimum 99,999,999.99
+
+      ANIQ (exact) hisoblaydi. PUL uchun HAR DOIM NUMERIC ishlatiladi.
+
+  REAL (float4), DOUBLE PRECISION (float8)
+      taqribiy (approximate), yaxlitlash xatoliklari bor.
+      0.1 + 0.2 != 0.3 muammosi. PUL uchun ASLO ISHLATMA.
+      Faqat ilmiy/statistik hisob-kitoblar uchun.
+
+--- MANTIQIY tur ---
+  BOOLEAN -> TRUE / FALSE / NULL
+  Qabul qiladi: true, false, 't', 'f', 'yes', 'no', 1, 0, 'on', 'off'
+
+  So'rovda:
+    WHERE is_active = true
+    WHERE is_active           -- qisqartma, xuddi shu ma'noda
+    WHERE NOT is_active
+    WHERE is_active IS TRUE
+
+--- SANA / VAQT turlari (part1 da TIMESTAMP ishlatilgan) ---
+  DATE          -> faqat sana:      2026-07-23
+  TIME          -> faqat vaqt:      14:30:00
+  TIMESTAMP     -> sana + vaqt, timezone SIZ
+  TIMESTAMPTZ   -> sana + vaqt, timezone BILAN  <-- TAVSIYA ETILADI
+  INTERVAL      -> vaqt oralig'i:   '3 days', '2 hours'
+
+  MUHIM MASLAHAT: real loyihalarda TIMESTAMP o'rniga TIMESTAMPTZ
+  ishlating. TIMESTAMP timezone ni saqlamaydi va turli mintaqalarda
+  muammo chiqadi.
+
+  Vaqt funksiyalari:
+    NOW()               -> hozirgi timestamp (tranzaksiya boshlangan vaqt)
+    CURRENT_TIMESTAMP   -> NOW() bilan bir xil
+    CURRENT_DATE        -> bugungi sana
+    CURRENT_TIME        -> hozirgi vaqt
+    clock_timestamp()   -> haqiqiy real vaqt (tranzaksiyadan qat'i nazar)
+
+    SELECT NOW() - INTERVAL '7 days';   -- 7 kun oldin
+    SELECT AGE(created_at);             -- qancha vaqt o'tgan
+
+--- SELECT asoslari (04-faylda ko'rilgan) ---
+  SELECT * FROM basics.products_basic;                    -- barcha ustun
+  SELECT id, name, total FROM basics.products_basic;      -- tanlangan ustun
+  SELECT * FROM basics.products_basic WHERE is_active = true;
+
+  Qo'shimcha:
+    SELECT name AS product_name FROM ...     -- alias (nom berish)
+    ... ORDER BY price DESC;                 -- saralash (ASC / DESC)
+    ... LIMIT 10;                            -- nechta qator
+    ... OFFSET 20;                           -- nechtasini o'tkazib yuborish
+    ... WHERE price BETWEEN 10 AND 100;
+    ... WHERE name LIKE 'A%';                -- 'A' bilan boshlanadi
+    ... WHERE name ILIKE 'a%';               -- katta-kichik harf farqsiz
+    ... WHERE id IN (1, 2, 3);
+    SELECT DISTINCT name FROM ...;           -- takrorlanmaydigan qiymatlar
+    SELECT COUNT(*) FROM ...;                -- qatorlar soni
+
+
+================================================================================
+5. BOSHQA DATA TYPES: UUID va JSONB
+================================================================================
+
+  CREATE TABLE basics.app_events(
+      id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      event_name TEXT NOT NULL,
+      metadata   JSONB DEFAULT '{}'::jsonb,
+      created_at TIMESTAMP DEFAULT NOW()
+  );
+
+  INSERT INTO basics.app_events (event_name, metadata) VALUES
+  ('sign_in', '{"name":"none"}'),
+  ('sign_up', '{"sdf":"user"}'),
+  ('test',    '{"sdf":"test"}');
+
+  SELECT event_name,
+         metadata ->> 'name' AS name
+  FROM basics.app_events
+  WHERE metadata ? 'name';
+
+--- UUID ---
+  128-bitli global unikal identifikator.
+  Misol: 550e8400-e29b-41d4-a716-446655440000
+
+  SERIAL vs UUID:
+    SERIAL  (+) qisqa, o'qishga oson, indeks kichik va tez
+            (-) taxmin qilish oson (1, 2, 3...), distributed tizimda konflikt
+    UUID    (+) taxmin qilib bo'lmaydi, mijoz tomonda generatsiya qilinadi,
+                bir nechta baza birlashtirilganda konflikt yo'q
+            (-) 16 bayt (SERIAL 4 bayt), random -> indeks fragmentatsiyasi
+
+  Generatsiya:
+    gen_random_uuid()   -- PG13+ da yadroda bor, eski versiyada pgcrypto kerak
+
+--- JSON vs JSONB ---
+  JSON   -> matn sifatida saqlanadi. Original formatni saqlaydi
+            (probellar, kalitlar tartibi). Sekin, indekslanmaydi.
+  JSONB  -> binar formatda saqlanadi (Binary). Parse qilingan holda.
+            Tezroq, INDEKSLASH MUMKIN, operatorlar boy.
+            Kalitlar tartibi saqlanmaydi, dublikat kalitlar tozalanadi.
+
+  QOIDA: deyarli har doim JSONB ishlating.
+
+--- JSONB OPERATORLARI (juda muhim) ---
+  ->    JSON obyekt/element qaytaradi (natija — jsonb)
+        metadata -> 'name'       ->  "none"   (qo'shtirnoq bilan!)
+
+  ->>   MATN (text) qaytaradi
+        metadata ->> 'name'      ->  none     (qo'shtirnoqsiz)
+
+  #>    ichma-ich yo'l bo'yicha (jsonb qaytaradi)
+        metadata #> '{user,address,city}'
+
+  #>>   ichma-ich yo'l bo'yicha (text qaytaradi)
+        metadata #>> '{user,name}'
+
+  ?     kalit MAVJUDMI?  (bu 05-faylda ishlatilgan)
+        WHERE metadata ? 'name'
+
+  ?|    berilgan kalitlardan BIRORTASI bormi?
+        WHERE metadata ?| array['name', 'email']
+
+  ?&    berilgan kalitlarning HAMMASI bormi?
+        WHERE metadata ?& array['name', 'email']
+
+  @>    o'z ichiga oladimi (contains)
+        WHERE metadata @> '{"name":"none"}'
+
+  <@    ichida joylashganmi (contained by)
+
+  ||    birlashtirish (merge)
+        metadata || '{"new":"key"}'::jsonb
+
+  -     kalitni o'chirish
+        metadata - 'name'
+
+--- ::jsonb — CAST (tur o'zgartirish) ---
+  '{}'::jsonb   -> matnni jsonb ga aylantirish
+  Ikkinchi shakl:  CAST('{}' AS jsonb)
+
+  Boshqa cast misollari:
+    '123'::INTEGER
+    price::TEXT
+    NOW()::DATE
+
+--- JSONB ni indekslash (tezlik uchun) ---
+  CREATE INDEX idx_events_metadata ON basics.app_events USING GIN (metadata);
+  -- shundan keyin `@>`, `?` operatorlari tez ishlaydi
+
+--- JSONB ni kengaytirish ---
+  SELECT jsonb_pretty(metadata) FROM basics.app_events;   -- chiroyli chiqarish
+  SELECT jsonb_object_keys(metadata) FROM basics.app_events; -- kalitlar
+  SELECT jsonb_typeof(metadata -> 'name');                -- turini bilish
+
+
+================================================================================
+6. NULL vs '' (BO'SH SATR) vs 0  —  JUDA MUHIM MAVZU
+================================================================================
+
+  INSERT INTO basics.value_examples (nickname, bio, score) VALUES
+  (null,       'null nickname',         10),
+  ('',         'empty string nickname', 20),
+  ('nickname', '',                       0),
+  ('none',     null,                  null);
+
+  SELECT * FROM basics.value_examples WHERE bio IS NULL;
+
+--- Uchtasining FARQI ---
+  NULL  -> "QIYMAT NOMA'LUM / MAVJUD EMAS". Bu qiymat EMAS, qiymat yo'qligi.
+  ''    -> BO'SH SATR. Bu QIYMAT — uzunligi 0 bo'lgan matn.
+  0     -> RAQAM nol. Bu ham to'liq qiymat.
+
+  Misol bilan:
+    NULL bio  -> "foydalanuvchi bio yozmagan, bilmaymiz"
+    ''   bio  -> "foydalanuvchi bio maydonini ochib, bo'sh qoldirib saqladi"
+    0    score-> "foydalanuvchi 0 ball to'pladi"
+    NULL score-> "hali o'yin o'ynamagan, ball yo'q"
+
+--- NULL BILAN ISHLASHNING OLTIN QOIDASI ---
+  NULL ni `=` yoki `!=` bilan solishtirib BO'LMAYDI!
+
+    WHERE bio = NULL      -->  HECH QACHON ishlamaydi (natija: NULL, ya'ni false)
+    WHERE bio IS NULL     -->  TO'G'RI
+    WHERE bio IS NOT NULL -->  TO'G'RI
+
+  Sababi: NULL = NULL  natijasi TRUE emas, NULL. Chunki "noma'lum" ni
+  "noma'lum" bilan solishtirsa, natija ham noma'lum.
+
+--- NULL ARIFMETIKASI ---
+  NULL + 5        = NULL
+  NULL || 'text'  = NULL   (konkatenatsiya)
+  NULL bilan har qanday amal -> NULL
+
+  Lekin AGREGAT funksiyalar NULL ni O'TKAZIB YUBORADI:
+    COUNT(*)      -> barcha qatorlar (NULL lar ham)
+    COUNT(bio)    -> faqat bio NULL BO'LMAGAN qatorlar
+    SUM(score)    -> NULL larni hisobga olmaydi
+    AVG(score)    -> NULL larni hisobga olmaydi (bo'luvchidan ham chiqarib
+                     tashlaydi — bu 0 bilan farq qiladi!)
+
+--- NULL BILAN ISHLASH FUNKSIYALARI ---
+  COALESCE(a, b, c)     -> birinchi NULL BO'LMAGAN qiymatni qaytaradi
+      SELECT COALESCE(nickname, 'Ismsiz') FROM basics.value_examples;
+
+  NULLIF(a, b)          -> agar a = b bo'lsa NULL, aks holda a
+      SELECT NULLIF(nickname, '') FROM ...;   -- bo'sh satrni NULL ga aylantirish
+
+  Ikkalasini birga ishlatish (juda foydali pattern):
+      SELECT COALESCE(NULLIF(nickname, ''), 'Ismsiz') FROM ...;
+      -- ham NULL, ham '' bo'lsa 'Ismsiz' qaytaradi
+
+  IS DISTINCT FROM      -> NULL-ni ham hisobga oladigan taqqoslash
+      WHERE a IS DISTINCT FROM b       -- NULL != qiymat -> TRUE
+      WHERE a IS NOT DISTINCT FROM b   -- NULL = NULL    -> TRUE
+
+--- AMALIY MASLAHAT ---
+  Loyihada QAROR QILIB OLING: "bo'sh matn" ni qanday saqlaysiz — NULL yoki ''?
+  Ikkalasini aralashtirmang, aks holda har bir so'rovda ikkalasini ham
+  tekshirishga majbur bo'lasiz. Ko'pchilik NULL ni tanlaydi va
+  CHECK (nickname <> '') constraint qo'yadi.
+
+--- UNIQUE va NULL ---
+  UNIQUE constraint bir nechta NULL ga RUXSAT BERADI (chunki NULL != NULL).
+  Ya'ni email UNIQUE bo'lsa ham, 10 ta qatorda email NULL bo'lishi mumkin.
+  Buni oldini olish uchun NOT NULL ham qo'shish kerak.
+
+
+================================================================================
+7. CONSTRAINTS (CHEKLOVLAR)
+================================================================================
+
+  CREATE TABLE basics.accounts(
+      id         SERIAL PRIMARY KEY,
+      full_name  TEXT NOT NULL,
+      email      TEXT NOT NULL UNIQUE,
+      is_active  BOOLEAN DEFAULT true,
+      age        INTEGER CHECK (age >= 18),
+      created_at TIMESTAMP DEFAULT NOW()
+  );
+
+CONSTRAINT — ma'lumot bazasi darajasidagi QOIDA. Bu qoidani buzuvchi
+ma'lumot BAZAGA UMUMAN KIRMAYDI. Backend kodidagi validatsiyadan
+ustunroq — chunki uni chetlab o'tib bo'lmaydi.
+
+--- 7.1 NOT NULL ---
+  Ustun NULL bo'lishi mumkin emas.
+    full_name TEXT NOT NULL
+  Buzilganda:  ERROR: null value in column "full_name" violates not-null constraint
+
+--- 7.2 UNIQUE ---
+  Qiymat takrorlanmaydi.
+    email TEXT UNIQUE
+  Bir nechta ustunni birga unikal qilish:
+    UNIQUE (user_id, product_id)   -- juftlik takrorlanmaydi
+  Eslatma: UNIQUE avtomatik INDEX yaratadi (tezlik uchun bonus).
+  Eslatma: bir nechta NULL ga ruxsat beradi (6-bo'limga qarang).
+
+--- 7.3 CHECK ---
+  Shartga mos kelmagan qiymatni rad etadi.
+    age INTEGER CHECK (age >= 18)
+    price NUMERIC(10,2) CHECK (price >= 0)
+    CHECK (email LIKE '%@%')
+    CHECK (start_date < end_date)          -- ikki ustunni bog'lash
+    CHECK (status IN ('new','paid','sent'))
+
+  DIQQAT: CHECK shart NULL ga aylansa, u O'TADI (rad etilmaydi)!
+    age = NULL bo'lsa, CHECK (age >= 18) -> NULL -> qabul qilinadi.
+    Shuning uchun kerak bo'lsa NOT NULL ham qo'shing.
+
+--- 7.4 DEFAULT ---
+  Qiymat kiritilmasa qo'yiladigan qiymat.
+    is_active  BOOLEAN DEFAULT true
+    created_at TIMESTAMP DEFAULT NOW()
+    stock      INTEGER DEFAULT 0
+
+  MUHIM: DEFAULT faqat ustun INSERT da UMUMAN KO'RSATILMAGANDA ishlaydi.
+  Agar aniq `NULL` yozsang, DEFAULT ishlamaydi:
+    INSERT INTO t (is_active) VALUES (NULL);   -- natija: NULL, true emas!
+    INSERT INTO t (full_name) VALUES ('x');    -- natija: is_active = true
+
+--- 7.5 PRIMARY KEY ---
+  = UNIQUE + NOT NULL. Jadvalda faqat BITTA bo'ladi. (8-bo'limda batafsil)
+
+--- 7.6 FOREIGN KEY (part2 da bo'ladi, lekin bilib qo'ying) ---
+  Boshqa jadvalning PRIMARY KEY iga havola. Bog'liqlikni ta'minlaydi.
+    user_id INTEGER REFERENCES basics.students(id) ON DELETE CASCADE
+
+--- CONSTRAINT GA NOM BERISH (yaxshi amaliyot) ---
+  Nomsiz:
+    age INTEGER CHECK (age >= 18)
+    -- avtomatik nom: accounts_age_check  (xato xabarida shu chiqadi)
+
+  Nom berilgan:
+    age INTEGER CONSTRAINT age_must_be_adult CHECK (age >= 18)
+    -- xato xabari tushunarli bo'ladi, keyin o'chirish oson
+
+--- CONSTRAINT NI KEYIN QO'SHISH / O'CHIRISH ---
+  ALTER TABLE basics.accounts
+    ADD CONSTRAINT price_positive CHECK (price >= 0);
+
+  ALTER TABLE basics.accounts
+    DROP CONSTRAINT price_positive;
+
+  ALTER TABLE basics.accounts
+    ADD CONSTRAINT uq_email UNIQUE (email);
+
+--- CONSTRAINT LARNI KO'RISH ---
+  \d basics.accounts           -- psql da eng oson yo'l
+
+  SELECT conname, pg_get_constraintdef(oid)
+  FROM pg_constraint
+  WHERE conrelid = 'basics.accounts'::regclass;
+
+
+================================================================================
+8. PRIMARY KEY va SERIAL / IDENTITY
+================================================================================
+
+  CREATE TABLE basics.sales(
+      id         SERIAL PRIMARY KEY,
+      title      TEXT NOT NULL,
+      price      NUMERIC(10,2) NOT NULL DEFAULT 0,
+      created_at TIMESTAMP DEFAULT NOW()
+  );
+
+--- PRIMARY KEY nima? ---
+  Har bir qatorni YAGONA tarzda aniqlab beruvchi ustun (yoki ustunlar to'plami).
+  Xususiyatlari:
+    1. UNIQUE  — takrorlanmaydi
+    2. NOT NULL — bo'sh bo'lmaydi
+    3. Jadvalda FAQAT BITTA PRIMARY KEY bo'ladi
+    4. Avtomatik INDEX yaratadi
+
+  Composite (murakkab) primary key — bir nechta ustundan:
+    CREATE TABLE order_items (
+        order_id   INTEGER,
+        product_id INTEGER,
+        qty        INTEGER,
+        PRIMARY KEY (order_id, product_id)
+    );
+
+--- SERIAL nima? ---
+  SERIAL — bu ALOHIDA TUR EMAS. Bu qisqartma (syntactic sugar).
+  Bu:
+      id SERIAL
+  aslida shunga aylanadi:
+      CREATE SEQUENCE students_id_seq;
+      id INTEGER NOT NULL DEFAULT nextval('students_id_seq');
+      ALTER SEQUENCE students_id_seq OWNED BY students.id;
+
+  SEQUENCE — bu alohida obyekt, ketma-ket sonlar generatori.
+  Ko'rish:  \ds
+
+  Turlari:
+    SMALLSERIAL -> smallint asosida  (max ~32K)
+    SERIAL      -> integer asosida   (max ~2.1 mlrd)
+    BIGSERIAL   -> bigint asosida    (juda katta)
+
+--- SERIAL vs IDENTITY (zamonaviy yondashuv) ---
+  SQL standarti va PostgreSQL 10+ da tavsiya etilgani — IDENTITY:
+
+    id INTEGER GENERATED ALWAYS BY DEFAULT AS IDENTITY PRIMARY KEY
+    id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY
+
+  Farqi:
+    SERIAL             -> qo'lda id kiritish mumkin (sequence buziladi)
+    GENERATED BY DEFAULT -> qo'lda kiritsa bo'ladi
+    GENERATED ALWAYS   -> qo'lda kiritish TAQIQLANADI (OVERRIDING kerak)
+
+  YANGI LOYIHALARDA:  BIGINT GENERATED ALWAYS AS IDENTITY  tavsiya etiladi.
+  Lekin SERIAL hali ham keng ishlatiladi va o'rganish uchun to'g'ri.
+
+--- SEQUENCE BILAN ISHLASH ---
+  SELECT currval('basics.sales_id_seq');   -- oxirgi berilgan qiymat
+  SELECT nextval('basics.sales_id_seq');   -- keyingi (va uni "sarflaydi")
+  SELECT last_value FROM basics.sales_id_seq;
+
+  -- Sequence ni to'g'rilash (masalan qo'lda id kiritib buzib qo'ysang):
+  SELECT setval('basics.sales_id_seq', (SELECT MAX(id) FROM basics.sales));
+
+--- MUHIM XUSUSIYAT: SEQUENCE DA "TESHIKLAR" BO'LADI ---
+  Agar INSERT muvaffaqiyatsiz bo'lsa yoki ROLLBACK qilinsa, sequence
+  ORQAGA QAYTMAYDI. Ya'ni id lar: 1, 2, 5, 6, 9 ... bo'lishi normal.
+  Bu XATO EMAS — bu shunday ishlab chiqilgan (concurrency uchun).
+  Shuning uchun id ni "nechta qator bor" degan ma'noda ishlatmang.
+
+
+================================================================================
+9. FOYDALI QO'SHIMCHALAR (part1 uchun bilish kerak)
+================================================================================
+
+--- 9.1 UPDATE va DELETE ---
+  UPDATE basics.sales SET price = 20.00 WHERE id = 1;
+  UPDATE basics.sales SET price = price * 1.1 WHERE price < 15;
+  UPDATE basics.sales SET price = 20 WHERE id = 1 RETURNING *;
+
+  DELETE FROM basics.sales WHERE id = 3;
+  DELETE FROM basics.sales;              -- HAMMASINI o'chiradi!
+
+  OGOHLANTIRISH: WHERE ni unutmang! WHERE siz UPDATE/DELETE butun
+  jadvalga ta'sir qiladi. Avval SELECT bilan tekshiring:
+    SELECT * FROM basics.sales WHERE id = 3;   -- avval buni
+    DELETE FROM basics.sales WHERE id = 3;     -- keyin buni
+
+--- 9.2 TRANZAKSIYALAR (transaction) ---
+  BEGIN;
+    UPDATE basics.sales SET price = 100 WHERE id = 1;
+    DELETE FROM basics.sales WHERE id = 2;
+  COMMIT;      -- tasdiqlash (saqlash)
+  -- yoki
+  ROLLBACK;    -- bekor qilish (hammasini qaytarish)
+
+  Xavfli operatsiyalarni BEGIN ichida bajarib, natijani ko'rib,
+  keyin COMMIT/ROLLBACK qilish — juda yaxshi odat.
+
+  SAVEPOINT bilan:
+    BEGIN;
+      INSERT ...;
+      SAVEPOINT sp1;
+      DELETE ...;
+      ROLLBACK TO sp1;    -- faqat DELETE bekor bo'ladi
+    COMMIT;
+
+  ACID xususiyatlari:
+    Atomicity   — hammasi bajariladi yoki hech nima
+    Consistency — baza doim to'g'ri holatda qoladi
+    Isolation   — tranzaksiyalar bir-biriga xalaqit bermaydi
+    Durability  — COMMIT dan keyin ma'lumot yo'qolmaydi
+
+--- 9.3 INDEX (qisqacha) ---
+  CREATE INDEX idx_students_email ON basics.students(email);
+  CREATE UNIQUE INDEX ... ;
+  DROP INDEX basics.idx_students_email;
+
+  Index — kitobning mundarijasi kabi. SELECT ni tezlashtiradi,
+  lekin INSERT/UPDATE ni biroz sekinlashtiradi va joy egallaydi.
+  PRIMARY KEY va UNIQUE avtomatik index yaratadi.
+
+--- 9.4 ON CONFLICT (UPSERT) ---
+  INSERT INTO basics.students (name, email, age)
+  VALUES ('Ali', 'ali@mail.com', 20)
+  ON CONFLICT (email) DO NOTHING;
+
+  INSERT INTO basics.students (name, email, age)
+  VALUES ('Ali', 'ali@mail.com', 21)
+  ON CONFLICT (email) DO UPDATE SET age = EXCLUDED.age;
+
+--- 9.5 IZOHLAR (comments) ---
+  -- bitta qatorli izoh
+  /* ko'p
+     qatorli izoh */
+
+--- 9.6 NOMLASH KONVENSIYASI (yaxshi amaliyot) ---
+  - snake_case ishlating: created_at, full_name (camelCase EMAS)
+  - jadval nomlari ko'plikda: students, products, sales
+  - PostgreSQL nomlarni avtomatik KICHIK HARFGA aylantiradi.
+    "MyTable" deb qo'shtirnoq bilan yozsang, keyin har doim
+    qo'shtirnoq bilan yozishga majbur bo'lasan. Qochish kerak.
+  - id ustuni: `id`, foreign key: `user_id`, `product_id`
+  - Vaqt ustunlari: created_at, updated_at, deleted_at
+
+--- 9.7 SKRIPTLARNI IDEMPOTENT QILISH ---
+  Part1 dagi barcha fayllar shu qoidaga amal qiladi:
+    DROP TABLE IF EXISTS ...;
+    CREATE TABLE ...;
+  Bu skriptni istalgan marta qayta ishga tushirish imkonini beradi.
+  Bu — o'rganish paytida oltin qoida.
+
+
+================================================================================
+10. TEZ-TEZ UCHRAYDIGAN XATOLAR VA YECHIMLARI
+================================================================================
+
+  "psql: command not found"
+      -> PATH ga PostgreSQL bin papkasini qo'shish (0.1 bo'limga qarang)
+
+  "could not connect to server ... is the server running?"
+      -> brew services start postgresql@16
+
+  "database ... does not exist"
+      -> createdb nomi   yoki  CREATE DATABASE nomi;
+
+  "role ... does not exist"
+      -> createuser -s nomi
+
+  "relation "students" does not exist"
+      -> schema ko'rsatilmagan. `basics.students` deb yozing
+         yoki SET search_path TO basics;
+
+  "duplicate key value violates unique constraint"
+      -> UNIQUE / PRIMARY KEY buzildi. Bunday qiymat allaqachon bor.
+
+  "null value in column ... violates not-null constraint"
+      -> NOT NULL ustunga qiymat berilmadi
+
+  "new row for relation ... violates check constraint"
+      -> CHECK sharti bajarilmadi (masalan age < 18)
+
+  "invalid input syntax for type integer"
+      -> matnni integer ustunga kiritishga urinish
+
+  "syntax error at or near ..."
+      -> odatda `;` yoki qavs yetishmayapti, yoki oldingi qator xato
+
+  "current transaction is aborted, commands ignored until end of
+   transaction block"
+      -> tranzaksiya ichida xato bo'ldi. ROLLBACK; yozing.
+
+  "database is being accessed by other users"
+      -> DROP DATABASE x WITH (FORCE);   yoki barcha ulanishlarni yoping
+
+
+================================================================================
+11. CHEAT SHEET (QISQA ESLATMA)
+================================================================================
+
+DDL (struktura):
+  CREATE DATABASE / DROP DATABASE
+  CREATE SCHEMA / DROP SCHEMA
+  CREATE TABLE / DROP TABLE / ALTER TABLE / TRUNCATE
+  CREATE INDEX / DROP INDEX
+  CREATE EXTENSION
+
+DML (ma'lumot):
+  INSERT INTO ... VALUES ...
+  SELECT ... FROM ... WHERE ... ORDER BY ... LIMIT ...
+  UPDATE ... SET ... WHERE ...
+  DELETE FROM ... WHERE ...
+
+TCL (tranzaksiya):
+  BEGIN / COMMIT / ROLLBACK / SAVEPOINT
+
+MA'LUMOT TURLARI — TANLASH QOIDASI:
+  Matn        -> TEXT   (uzunlik cheklovi kerak bo'lsa VARCHAR(n))
+  Butun son   -> INTEGER (katta bo'lsa BIGINT)
+  Pul / aniq  -> NUMERIC(10,2)     [FLOAT ASLO EMAS]
+  Ha/Yo'q     -> BOOLEAN
+  Vaqt        -> TIMESTAMPTZ       [TIMESTAMP dan afzal]
+  ID          -> BIGINT GENERATED ALWAYS AS IDENTITY  yoki  SERIAL
+  Global ID   -> UUID DEFAULT gen_random_uuid()
+  Struktura   -> JSONB              [JSON EMAS]
+
+CONSTRAINTS:
+  NOT NULL   — bo'sh bo'lmasin
+  UNIQUE     — takrorlanmasin
+  CHECK      — shart bajarilsin
+  DEFAULT    — kiritilmasa shu qiymat
+  PRIMARY KEY— UNIQUE + NOT NULL, bitta
+  FOREIGN KEY— boshqa jadvalga havola (part2)
+
+NULL QOIDALARI:
+  IS NULL / IS NOT NULL    ishlatiladi
+  = NULL / != NULL         ISHLAMAYDI
+  COALESCE(a, b)           birinchi NULL bo'lmaganini olish
+  NULLIF(a, b)             teng bo'lsa NULL qilish
+
+ENG KERAKLI PSQL KOMANDALARI:
+  \l   \c db   \dn   \dt   \d table   \dx   \du   \x   \timing   \i file   \q
+
+
+================================================================================
+PART1 FAYLLARI RO'YXATI
+================================================================================
+  01_first_database.sql        — DATABASE yaratish
+  02_first_schema.sql          — SCHEMA + EXTENSION + information_schema
+  03_first_table.sql           — birinchi TABLE, INSERT, SELECT
+  04_data_types.sql            — VARCHAR, TEXT, INTEGER, BIGINT, NUMERIC, BOOLEAN
+  05_other_data_types.sql      — UUID, JSONB, ->>, ? operatorlari
+  06_null_empty_string_zero.sql— NULL vs '' vs 0
+  07_constraints.sql           — NOT NULL, UNIQUE, CHECK, DEFAULT
+  09_primary_keys.sql          — PRIMARY KEY, SERIAL, sequence
+
+  (08 raqami yo'q — o'tkazib yuborilgan)
+
+================================================================================
+                              PART1 TUGADI
+   Keyingi qadam (part2): FOREIGN KEY, JOIN turlari, GROUP BY, aggregate
+   funksiyalar, subquery, index'lar chuqurroq, VIEW, normalizatsiya.
+================================================================================

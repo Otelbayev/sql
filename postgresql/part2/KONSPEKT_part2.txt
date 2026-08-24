@@ -1,0 +1,1516 @@
+================================================================================
+                POSTGRESQL — PART 2 KONSPEKT
+      (CRUD asoslari: INSERT, SELECT, WHERE filtrlash, UPDATE, DELETE)
+================================================================================
+
+MUNDARIJA
+---------
+0.  Part2 ga kirish — bazani tayyorlash va terminal eslatmasi
+1.  Baza jadval: products (01_sql_concepts_base_file.sql)
+2.  INSERT — bitta qator
+3.  INSERT — bir nechta qator
+4.  SELECT: aniq ustunlar vs SELECT *  |  AS (alias)
+5.  WHERE — asosiy filtrlash
+6.  AND / OR / NOT — mantiqiy operatorlar
+7.  LIKE / ILIKE — matn shabloni bo'yicha qidirish
+8.  IN / NOT IN / BETWEEN
+9.  IS NULL / IS NOT NULL
+10. ORDER BY — saralash
+11. LIMIT / OFFSET — sahifalash (pagination)
+12. UPDATE — bitta qator
+13. UPDATE — bir nechta qator
+14. DELETE — qator o'chirish
+15. RETURNING — o'zgargan qatorni qaytarish
+16. Qo'shimcha bilishi kerak bo'lgan narsalar
+17. SQL bajarilish TARTIBI (juda muhim)
+18. Tez-tez uchraydigan xatolar va tuzoqlar
+19. Cheat sheet
+
+
+================================================================================
+0. PART2 GA KIRISH
+================================================================================
+
+Part1 da STRUKTURA (database, schema, table, tiplar, constraint) o'rganildi.
+Part2 da esa MA'LUMOT BILAN ISHLASH — ya'ni CRUD:
+
+    C = CREATE  -> INSERT
+    R = READ    -> SELECT
+    U = UPDATE  -> UPDATE
+    D = DELETE  -> DELETE
+
+Part2 dagi barcha fayllar BITTA `products` jadvali ustida ishlaydi.
+Shuning uchun tartib muhim: avval 01 ni ishga tushirasan, keyin qolganlarini.
+
+--- Terminal orqali ishga tushirish ---
+  # Bazani tayyorlash (bir marta):
+  psql -U postgres -d postgresql_part1 -f part2/01_sql_concepts_base_file.sql
+
+  # Keyin har bir faylni alohida:
+  psql -U postgres -d postgresql_part1 -f part2/05_where_basic_filter.sql
+
+  # Yoki psql ichidan:
+  \i /Users/none/Desktop/postgresql/part2/01_sql_concepts_base_file.sql
+
+--- Foydali psql sozlamalari part2 uchun ---
+  \x auto        -- uzun qatorlarni vertikal ko'rsatadi (products keng jadval)
+  \timing        -- har bir so'rov necha ms ishlaganini ko'rsatadi
+  \d products    -- jadval strukturasini ko'rish
+
+MUHIM FARQ part1 dan: bu yerda `basics.` schema ishlatilmagan, ya'ni
+`products` jadvali `public` schemada yaratilgan. Shuning uchun so'rovlarda
+schema nomi yozilmaydi.
+
+
+================================================================================
+1. BAZA JADVAL — products
+================================================================================
+
+  CREATE EXTENSION IF NOT EXISTS pgcrypto;
+
+  DROP TABLE IF EXISTS products;
+
+  CREATE TABLE products(
+      id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      name        TEXT NOT NULL,
+      category    TEXT NOT NULL,
+      price       NUMERIC(10,2) NOT NULL CHECK (price >= 0),
+      stock       INTEGER NOT NULL CHECK (stock >= 0),
+      is_active   BOOLEAN NOT NULL DEFAULT true,
+      sku         TEXT UNIQUE,
+      description TEXT,
+      created_at  TIMESTAMP DEFAULT NOW()
+  );
+
+--- Nima uchun aynan shunday tuzilgan? ---
+  id UUID DEFAULT gen_random_uuid()
+      SERIAL o'rniga UUID — global unikal ID. pgcrypto extension shu uchun.
+      (PG13+ da pgcrypto shart emas, gen_random_uuid() yadroda bor.)
+
+  price NUMERIC(10,2) NOT NULL CHECK (price >= 0)
+      Pul -> NUMERIC. Manfiy narx bo'lishi mumkin emas -> CHECK.
+      Bu yerda IKKI qatlam himoya: NOT NULL + CHECK.
+
+  stock INTEGER NOT NULL CHECK (stock >= 0)
+      Omborda manfiy miqdor bo'lmaydi.
+
+  is_active BOOLEAN NOT NULL DEFAULT true
+      "Soft delete" pattern uchun — mahsulotni o'chirmasdan, faqat
+      is_active=false qilib "yashirish". Real loyihalarda juda ko'p ishlatiladi.
+
+  sku TEXT UNIQUE
+      SKU = Stock Keeping Unit — mahsulotning ombordagi kodi.
+      UNIQUE — takrorlanmaydi. Lekin NOT NULL EMAS, ya'ni bo'sh qolishi mumkin.
+      ESLATMA: UNIQUE bir nechta NULL ga ruxsat beradi (part1, 6-bo'lim).
+
+  description TEXT
+      Ataylab NULL bo'lishi mumkin qilib qoldirilgan — 09-faylda
+      IS NULL / IS NOT NULL ni sinab ko'rish uchun. Ba'zi qatorlarda NULL.
+
+--- Boshlang'ich ma'lumot (seed data) ---
+  8 ta mahsulot kiritilgan, 3 ta kategoriyada:
+    electronics -> Mechanical Keyboard, Wireless Mouse, USB-C Cable, Old Monitor
+    furniture   -> Office Chair, Standing Desk
+    stationery  -> Notebook, Gel Pen
+
+  Ataylab qo'yilgan "qiyinchiliklar" (test uchun):
+    - USB-C Cable va Gel Pen -> description = NULL
+    - Old Monitor            -> is_active = FALSE, stock = 0
+    - narxlar 25.00 dan 15989.00 gacha -> BETWEEN, ORDER BY sinash uchun
+
+--- Bu FAYL IDEMPOTENT ---
+  DROP TABLE IF EXISTS + CREATE TABLE => qayta-qayta ishga tushirish mumkin.
+  Har safar toza, boshlang'ich holatga qaytadi.
+  AGAR boshqa fayllarda ma'lumotni buzib qo'ysang — shunchaki 01 ni qayta
+  ishga tushir, hammasi tiklanadi.
+
+
+================================================================================
+2. INSERT — BITTA QATOR
+================================================================================
+
+  INSERT INTO products (name, category, price, stock, is_active, sku, description)
+  VALUES
+  ('Mechanical Keyboard', 'electronics', 3499.00, 15, TRUE,
+   'ELEC-KEY-0091', 'RGB keyboard with blue switches');
+
+--- Sintaksis ---
+  INSERT INTO jadval_nomi (ustun1, ustun2, ...)
+  VALUES (qiymat1, qiymat2, ...);
+
+--- MUHIM QOIDALAR ---
+  1. Ustun nomlarini HAR DOIM ko'rsating.
+       INSERT INTO products (name, price) VALUES ('X', 10);   -- YAXSHI
+       INSERT INTO products VALUES (...);                     -- YOMON
+     Sababi: ikkinchi shakl ustunlar TARTIBIGA bog'liq. Agar keyinchalik
+     jadvalga ustun qo'shsang, barcha eski INSERT lar buziladi.
+
+  2. Ko'rsatilmagan ustunlar DEFAULT qiymatini oladi:
+       id         -> gen_random_uuid() avtomatik
+       is_active  -> true
+       created_at -> NOW()
+
+  3. Matn qiymatlar BITTA QO'SHTIRNOQDA:  'electronics'
+     Ikkita qo'shtirnoq "..." — bu USTUN NOMI uchun, qiymat uchun emas!
+       WHERE category = 'electronics'    -- to'g'ri
+       WHERE category = "electronics"    -- XATO: ustun deb o'ylaydi
+
+  4. Matn ichida apostrof bo'lsa, ikki marta yoziladi:
+       'John''s laptop'
+     yoki dollar-quoting:
+       $$John's laptop$$
+
+--- NEGA bu faylda sku 'ELEC-KEY-0091' ? ---
+  Chunki 01-faylda allaqachon 'ELEC-KEY-001' bor. sku UNIQUE bo'lgani uchun
+  bir xil sku bilan qayta kiritsa XATO beradi:
+     ERROR: duplicate key value violates unique constraint "products_sku_key"
+  Nomi bir xil ('Mechanical Keyboard') bo'lishi mumkin — chunki name UNIQUE emas.
+  Bu UNIQUE constraint qanday ishlashini ko'rsatuvchi yaxshi misol.
+
+--- INSERT natijasini tekshirish ---
+  INSERT bajarilgach psql shunday chiqaradi:
+     INSERT 0 1
+  Bu: "0 ta oid, 1 ta qator kiritildi" degani. Ikkinchi raqam muhim.
+
+
+================================================================================
+3. INSERT — BIR NECHTA QATOR
+================================================================================
+
+  INSERT INTO products (
+      name, category, price, stock, sku, description
+  ) VALUES
+  ('laptom 1', 'category', 10.33, 5, 'false', 'desk'),
+  ('laptom 2', 'category', 10.33, 5, 'none',  'desk'),
+  ('laptom 3', 'category', 10.33, 5, 'true',  'desk'),
+  ('laptom 4', 'category', 10.33, 5, 'true',  'desk');
+
+--- Sintaksis ---
+  Bitta INSERT ichida VALUES dan keyin qavslarni VERGUL bilan ajratasan.
+  Oxirgisidan keyin vergul YO'Q, `;` bor.
+
+--- NEGA bir nechta qatorni birga kiritish yaxshi? ---
+  1. TEZLIK. 1000 ta alohida INSERT vs bitta INSERT 1000 qator bilan —
+     ikkinchisi 10-50 barobar tez. Har bir INSERT alohida tarmoq murojaati
+     va alohida tranzaksiya bo'ladi.
+  2. ATOMARLIK. Bitta INSERT = bitta tranzaksiya. Agar 3-qatorda xato bo'lsa,
+     HECH BIRI kirmaydi. Bu ko'pincha aynan kerakli xatti-harakat.
+
+--- DIQQAT: bu fayldagi bir tuzoq ---
+  sku ustuniga 'false', 'none', 'true' qiymatlari yozilgan.
+  Texnik jihatdan bu ISHLAYDI, chunki sku — TEXT turi, ular oddiy matn.
+  LEKIN 3-qatorda 'true' va 4-qatorda ham 'true' bor —
+  sku UNIQUE bo'lgani uchun bu XATO beradi:
+     ERROR: duplicate key value violates unique constraint "products_sku_key"
+  Va yuqoridagi ATOMARLIK qoidasi tufayli — 4 ta qatordan HECH BIRI kirmaydi.
+
+  Bu aslida yaxshi o'rganish momenti: INSERT ning "hammasi yoki hech nima"
+  xususiyatini ko'rsatadi.
+
+  Tuzatish: har bir sku ni har xil qilish, yoki NULL qoldirish:
+    ('laptom 3', 'category', 10.33, 5, 'sku-3', 'desk'),
+    ('laptom 4', 'category', 10.33, 5, NULL,    'desk'),
+
+--- Faylning oxiridagi SELECT ---
+  SELECT name, price FROM products
+  WHERE sku IN ('ELEC-CAB-001', 'ELEC-MOU-001');
+
+  IN operatori — 8-bo'limda batafsil. Bu yerda "sku shu ikkisidan biri
+  bo'lgan qatorlarni ko'rsat" degani.
+
+--- Xatoga chidamli INSERT: ON CONFLICT ---
+  Agar dublikat bo'lsa xato bermasdan o'tkazib yuborish:
+    INSERT INTO products (name, category, price, stock, sku)
+    VALUES ('laptom 4', 'category', 10.33, 5, 'true')
+    ON CONFLICT (sku) DO NOTHING;
+
+  Yoki mavjudini yangilash (UPSERT):
+    INSERT INTO products (name, category, price, stock, sku)
+    VALUES ('laptom 4', 'category', 20.00, 5, 'true')
+    ON CONFLICT (sku) DO UPDATE SET price = EXCLUDED.price;
+
+  EXCLUDED — bu "kiritmoqchi bo'lgan, lekin konflikt bo'lgan qator".
+
+
+================================================================================
+4. SELECT: ANIQ USTUNLAR vs SELECT *  |  AS (ALIAS)
+================================================================================
+
+  -- Aniq ustunlar
+  SELECT name, price FROM products;
+
+  -- AS (alias — nom berish)
+  SELECT name AS pr_name, price AS pr_price FROM products;
+
+--- SELECT * NEGA YOMON? ---
+  SELECT * FROM products;   -- barcha ustunlar
+
+  Muammolari:
+  1. KERAKSIZ MA'LUMOT tashiladi. products da `description` uzun matn
+     bo'lishi mumkin — agar kerak bo'lmasa, uni tortib olish bekorga
+     tarmoq va xotira sarflaydi.
+  2. INDEX-ONLY SCAN buziladi. Agar index (name, price) bo'lsa, faqat shu
+     ikkitasini so'rasang PostgreSQL jadvalga umuman murojaat qilmaydi —
+     to'g'ridan-to'g'ri indeksdan oladi. `*` bu optimizatsiyani o'ldiradi.
+  3. KOD SINIB QOLADI. Jadvalga yangi ustun qo'shilsa yoki tartib o'zgarsa,
+     backend kodi kutilmaganda boshqacha ma'lumot oladi.
+  4. O'QISHGA QIYIN. `SELECT *` ni o'qigan odam qaysi maydonlar
+     ishlatilishini bilmaydi.
+
+  QACHON `*` MAQBUL:
+    - psql da qo'lda tekshirib ko'rayotganda
+    - o'rganish paytida
+    - COUNT(*) da (bu alohida holat, ustun o'qilmaydi)
+
+  QOIDA: PRODUCTION KODDA HECH QACHON `SELECT *` ISHLATMANG.
+
+--- AS — ALIAS (taxallus) ---
+  Ustunga so'rov natijasida boshqa nom berish:
+    SELECT name AS pr_name FROM products;
+
+  `AS` so'zini tashlab ketish ham mumkin (lekin yozgan aniqroq):
+    SELECT name pr_name FROM products;
+
+  Alias ichida probel yoki katta harf kerak bo'lsa — QO'SHTIRNOQ:
+    SELECT name AS "Product Name", price AS "Narxi" FROM products;
+
+  QACHON kerak bo'ladi:
+    1. Hisoblangan ustunga nom berish:
+         SELECT name, price * 1.12 AS price_with_tax FROM products;
+         -- aliassiz ustun nomi `?column?` bo'lib chiqadi
+    2. JOIN da ikki jadvalda bir xil ustun nomi bo'lsa (part3)
+    3. Backend/ORM kutayotgan nomga moslashtirish
+
+  JADVAL uchun ham alias bo'ladi:
+    SELECT p.name, p.price FROM products AS p;
+    SELECT p.name, p.price FROM products p;     -- AS siz ham bo'ladi
+
+--- Hisoblangan (computed) ustunlar ---
+  SELECT name,
+         price,
+         stock,
+         price * stock AS total_value,
+         ROUND(price * 1.12, 2) AS price_with_vat
+  FROM products;
+
+  Matnlarni birlashtirish (konkatenatsiya):
+    SELECT name || ' (' || category || ')' AS full_label FROM products;
+    -- DIQQAT: agar biror qism NULL bo'lsa, NATIJA butunlay NULL bo'ladi!
+    -- Xavfsizi:
+    SELECT CONCAT(name, ' (', category, ')') FROM products;  -- NULL ni '' deb oladi
+
+
+================================================================================
+5. WHERE — ASOSIY FILTRLASH
+================================================================================
+
+  -- products?category=electronics   (REST API filtriga o'xshash)
+  SELECT name, category, price FROM products WHERE category = 'electronics';
+  SELECT name FROM products WHERE price > 1000;
+  SELECT name, is_active FROM products WHERE is_active = FALSE;
+
+--- WHERE nima qiladi? ---
+  Qatorlarni FILTRLAYDI. Shart TRUE bo'lgan qatorlar qaytariladi.
+  Shart FALSE yoki NULL bo'lsa — qator TASHLAB YUBORILADI.
+
+  Bu oxirgi jumla juda muhim: NULL natija ham qatorni chiqarib tashlaydi.
+
+--- Taqqoslash operatorlari ---
+  =         teng
+  <>  yoki !=   teng emas   (ikkalasi bir xil, `<>` — SQL standarti)
+  >         katta
+  <         kichik
+  >=        katta yoki teng
+  <=        kichik yoki teng
+
+--- Turlar bo'yicha misollar ---
+  Matn (bitta qo'shtirnoq, katta-kichik harf FARQ QILADI):
+    WHERE category = 'electronics'      -- topadi
+    WHERE category = 'Electronics'      -- TOPMAYDI!
+
+  Son (qo'shtirnoqsiz):
+    WHERE price > 1000
+    WHERE stock = 0
+    WHERE price <> 99.00
+
+  Boolean (uch xil yozish mumkin):
+    WHERE is_active = FALSE
+    WHERE NOT is_active            -- bir xil ma'no, qisqaroq
+    WHERE is_active IS FALSE       -- NULL-xavfsiz shakl
+    WHERE is_active                -- true bo'lganlar
+
+  Sana:
+    WHERE created_at > '2026-01-01'
+    WHERE created_at >= NOW() - INTERVAL '7 days'
+    WHERE created_at::DATE = CURRENT_DATE
+
+--- REST API bilan bog'liqlik (faylning izohidagi fikr) ---
+  Backend da GET /products?category=electronics&min_price=1000
+  so'rovi kelganda, sen shunga o'xshash SQL yozasan:
+
+    SELECT id, name, price FROM products
+    WHERE category = $1 AND price >= $2;
+
+  $1, $2 — PARAMETRLAR (placeholder). Qiymatlarni HECH QACHON
+  satrga yopishtirmang:
+    -- XAVFLI (SQL injection):
+    "SELECT * FROM products WHERE category = '" + userInput + "'"
+    -- TO'G'RI:
+    db.Query("SELECT * FROM products WHERE category = $1", userInput)
+
+
+================================================================================
+6. AND / OR / NOT — MANTIQIY OPERATORLAR
+================================================================================
+
+  -- AND — HAR BIR shart bajarilishi kerak
+  SELECT * FROM products WHERE category = 'electronics' AND price > 1000;
+
+  -- OR — KAMIDA BITTA shart bajarilsa bo'ldi
+  SELECT * FROM products WHERE category = 'electronics' OR category = 'furniture';
+
+  -- NOT — shartni TESKARISIGA aylantiradi
+  SELECT * FROM products WHERE NOT category = 'electronics';
+
+--- Haqiqat jadvali ---
+  A      B      A AND B    A OR B
+  TRUE   TRUE   TRUE       TRUE
+  TRUE   FALSE  FALSE      TRUE
+  FALSE  FALSE  FALSE      FALSE
+
+  NOT TRUE  = FALSE
+  NOT FALSE = TRUE
+  NOT NULL  = NULL      <-- TUZOQ!
+
+--- AMAL TARTIBI (operator precedence) — ENG KO'P XATO SHU YERDA ---
+  Kuch tartibi:  NOT  >  AND  >  OR
+
+  Bu degani `AND` `OR` dan OLDIN hisoblanadi:
+
+    WHERE a = 1 OR a = 2 AND b = 3
+    -- PostgreSQL buni shunday tushunadi:
+    WHERE a = 1 OR (a = 2 AND b = 3)
+    -- Sen esa balki buni xohlagandirsan:
+    WHERE (a = 1 OR a = 2) AND b = 3
+
+  MISOL (real xato):
+    -- Xohlagan: elektronika yoki mebel, VA narxi 1000 dan katta
+    SELECT * FROM products
+    WHERE category = 'electronics' OR category = 'furniture' AND price > 1000;
+    -- Bu aslida: elektronikaning HAMMASI + narxi>1000 bo'lgan mebel
+
+    -- To'g'ri:
+    SELECT * FROM products
+    WHERE (category = 'electronics' OR category = 'furniture') AND price > 1000;
+
+  OLTIN QOIDA: AND va OR ni ARALASHTIRSANG — HAR DOIM QAVS QO'Y.
+  Qavs ortiqcha bo'lsa ham zarari yo'q, lekin xatodan saqlaydi.
+
+--- NOT ning NULL TUZOG'I ---
+  SELECT * FROM products WHERE NOT category = 'electronics';
+
+  Bu yerda `category` NOT NULL bo'lgani uchun muammo yo'q.
+  LEKIN agar ustun NULL bo'lishi mumkin bo'lsa:
+
+    SELECT * FROM products WHERE NOT description = 'desk';
+    -- description NULL bo'lgan qatorlar CHIQMAYDI!
+    -- Chunki: NULL = 'desk' -> NULL, NOT NULL -> NULL, NULL != TRUE
+
+  To'g'ri yechim:
+    WHERE description IS DISTINCT FROM 'desk'
+    -- yoki
+    WHERE description <> 'desk' OR description IS NULL
+
+--- Ko'p shartli murakkab misollar ---
+  -- Faol, omborda bor, arzon mahsulotlar
+  SELECT name, price, stock FROM products
+  WHERE is_active = TRUE
+    AND stock > 0
+    AND price < 5000;
+
+  -- Elektronika yoki mebel, faol, narxi 1000-10000 oralig'ida
+  SELECT name, category, price FROM products
+  WHERE (category = 'electronics' OR category = 'furniture')
+    AND is_active
+    AND price BETWEEN 1000 AND 10000;
+
+
+================================================================================
+7. LIKE / ILIKE — MATN SHABLONI BO'YICHA QIDIRISH
+================================================================================
+
+  SELECT name, price FROM products WHERE name LIKE 'usb%';
+  SELECT name, price FROM products WHERE name ILIKE 'uSb%';
+  SELECT name, price FROM products WHERE description ILIKE '%with%';
+
+--- LIKE vs ILIKE ---
+  LIKE   -> katta-kichik harf FARQ QILADI (case-sensitive)
+  ILIKE  -> katta-kichik harf FARQ QILMAYDI (case-Insensitive)
+            "I" = Insensitive. Bu PostgreSQL kengaytmasi (standart SQL emas).
+
+  Faylingdagi juda yaxshi misol:
+    WHERE name LIKE  'usb%'   -> HECH NIMA topmaydi
+    WHERE name ILIKE 'uSb%'   -> 'USB-C Cable' ni topadi
+
+  Sababi: jadvalda nom 'USB-C Cable' — katta harflar bilan.
+  LIKE aniq mos kelishni talab qiladi, ILIKE esa yo'q.
+
+  QOIDA: foydalanuvchi qidiruvida (search bar) HAR DOIM ILIKE ishlating.
+  Odam 'usb', 'USB', 'Usb' deb yozishi mumkin.
+
+--- SHABLON BELGILARI (wildcards) ---
+  %   -> ISTALGAN sondagi (0 ta ham) istalgan belgi
+  _   -> ANIQ BITTA istalgan belgi
+
+  Misollar:
+    'usb%'      -> "usb" bilan BOSHLANADI          -> USB-C Cable
+    '%cable'    -> "cable" bilan TUGAYDI           -> USB-C Cable
+    '%with%'    -> ichida "with" BOR (istalgan joyda)
+    'Gel Pen'   -> ANIQ shu (wildcard yo'q, = bilan bir xil)
+    '_el%'      -> 2-3-4 belgisi "el", oldida bitta belgi -> Gel Pen
+    'Notebook_' -> "Notebook" + aniq bitta belgi
+
+--- % ning JOYLASHUVI va TEZLIK ---
+  'usb%'    -> PREFIKS qidiruv. INDEX ISHLAYDI. TEZ.
+  '%usb'    -> SUFFIKS qidiruv. Index ishlamaydi. Sekin.
+  '%usb%'   -> ICHIDA qidiruv.  Index ishlamaydi. ENG SEKIN.
+
+  Ya'ni `%with%` kabi so'rov butun jadvalni skanerlaydi (full table scan).
+  Kichik jadvalda muammo yo'q, lekin million qatorda — juda sekin.
+
+  Katta jadvalda matn qidiruvi uchun yechimlar:
+    1. Trigram index (pg_trgm extension):
+         CREATE EXTENSION pg_trgm;
+         CREATE INDEX idx_products_name_trgm
+           ON products USING GIN (name gin_trgm_ops);
+       Shundan keyin `%usb%` ham TEZ ishlaydi.
+
+    2. Full-text search (to'liq matnli qidiruv):
+         WHERE to_tsvector('english', description) @@ to_tsquery('keyboard');
+
+--- MAXSUS BELGILARNI QIDIRISH (escaping) ---
+  Agar aynan `%` yoki `_` belgisini qidirmoqchi bo'lsang:
+    WHERE name LIKE '%\%%'  ESCAPE '\'      -- ichida % bor
+    WHERE sku LIKE 'ELEC\_%' ESCAPE '\'     -- ELEC_ bilan boshlanadi
+
+  DIQQAT: `_` ni ESCAPE qilmasang, u "istalgan bitta belgi" bo'lib qoladi.
+  'ELEC_KEY' shabloni 'ELEC-KEY' ni ham topadi!
+
+--- NULL va LIKE ---
+  description NULL bo'lgan qatorlar LIKE/ILIKE da HECH QACHON chiqmaydi.
+  NULL LIKE '%with%'  ->  NULL  ->  qator tashlab yuboriladi.
+  Bu odatda kutilgan xatti-harakat, lekin bilib turish kerak.
+
+--- ALTERNATIVALAR ---
+  SIMILAR TO       -> regex-ga o'xshash, kam ishlatiladi
+  ~   / ~*         -> POSIX regex (mos keladi / katta-kichik farqsiz)
+  !~  / !~*        -> mos kelmaydi
+
+    WHERE name ~* '^usb'          -- ILIKE 'usb%' bilan bir xil
+    WHERE sku ~ '^ELEC-[A-Z]{3}'  -- regex kuchi
+
+  POSITION / STRPOS:
+    WHERE POSITION('with' IN description) > 0
+    WHERE STRPOS(LOWER(description), 'with') > 0
+
+
+================================================================================
+8. IN / NOT IN / BETWEEN
+================================================================================
+
+  SELECT name, category, price FROM products
+  WHERE category IN ('electronics', 'furniture');
+
+  SELECT name, category, price FROM products
+  WHERE category NOT IN ('electronics', 'furniture');
+
+  SELECT name, category, price FROM products
+  WHERE price BETWEEN 1000 AND 2000;
+
+  SELECT name, category, price FROM products
+  WHERE price BETWEEN 1000 AND 2000 AND category IN ('electronics');
+
+--- IN — ro'yxatdan biri ---
+  Bu:
+    WHERE category IN ('electronics', 'furniture')
+  aynan shunga teng:
+    WHERE category = 'electronics' OR category = 'furniture'
+
+  Lekin IN:
+    - qisqaroq va o'qishga oson
+    - ko'p qiymatda ancha toza ko'rinadi
+    - PostgreSQL uni optimallashtira oladi
+
+  Sonlar bilan:
+    WHERE stock IN (0, 5, 10)
+
+  Subquery bilan (part3 mavzusi, lekin ko'rib qo'ying):
+    WHERE category IN (SELECT name FROM categories WHERE is_active);
+
+--- NOT IN va NULL TUZOG'I  (ENG XAVFLI TUZOQ) ---
+  Agar ro'yxatda YOKI ustunda NULL bo'lsa, NOT IN KUTILMAGANCHA ishlaydi:
+
+    WHERE category NOT IN ('electronics', NULL)
+    -- HECH QANDAY qator qaytmaydi!
+
+  Sababi:
+    NOT IN (a, b) = (x <> a) AND (x <> b)
+    x <> NULL -> NULL
+    TRUE AND NULL -> NULL -> qator tashlanadi
+
+  Shuningdek, ustunning o'zi NULL bo'lsa ham qator chiqmaydi:
+    WHERE description NOT IN ('desk')
+    -- description NULL bo'lgan qatorlar CHIQMAYDI
+
+  XAVFSIZ ALTERNATIVA:
+    WHERE category IS DISTINCT FROM 'electronics'
+    -- yoki subquery bilan:
+    WHERE NOT EXISTS (SELECT 1 FROM ... WHERE ...)
+    -- yoki NULL ni aniq hisobga olish:
+    WHERE (category NOT IN ('electronics') OR category IS NULL)
+
+  QOIDA: NOT IN ishlatishdan oldin "bu yerda NULL bo'lishi mumkinmi?"
+  deb so'rang. Agar ha bo'lsa — NOT EXISTS yoki IS DISTINCT FROM ishlating.
+
+--- BETWEEN — oraliq ---
+  Bu:
+    WHERE price BETWEEN 1000 AND 2000
+  aynan shunga teng:
+    WHERE price >= 1000 AND price <= 2000
+
+  MUHIM: BETWEEN IKKI TOMONLAMA INKLYUZIV (chegaralar KIRADI).
+  1000 ham, 2000 ham natijaga kiradi.
+
+  NOT BETWEEN ham bor:
+    WHERE price NOT BETWEEN 1000 AND 2000
+
+  Tartib muhim: BETWEEN kichik AND katta. Teskarisi — hech nima qaytarmaydi:
+    WHERE price BETWEEN 2000 AND 1000    -- doim bo'sh natija
+
+--- BETWEEN va SANA — KLASSIK XATO ---
+  WHERE created_at BETWEEN '2026-01-01' AND '2026-01-31'
+
+  Bu 31-yanvarning FAQAT 00:00:00 ini oladi! Kun davomidagi
+  (masalan 31-yanvar 14:30) yozuvlar CHIQMAYDI, chunki
+  '2026-01-31' aslida '2026-01-31 00:00:00' degani.
+
+  TO'G'RI YO'L (yarim ochiq oraliq):
+    WHERE created_at >= '2026-01-01'
+      AND created_at <  '2026-02-01'
+
+  Bu pattern hamma joyda ishlaydi va vaqt zonasi bilan ham xavfsiz.
+
+--- IN ning muqobili: ANY / ALL ---
+  WHERE category = ANY (ARRAY['electronics', 'furniture'])   -- IN bilan bir xil
+  WHERE category <> ALL (ARRAY['electronics'])               -- NOT IN bilan
+  WHERE price > ALL (ARRAY[100, 200, 300])                   -- hammasidan katta
+
+  Backend kodda massiv parametr uzatishda qulay:
+    db.Query("SELECT * FROM products WHERE category = ANY($1)", pq.Array(cats))
+
+
+================================================================================
+9. IS NULL / IS NOT NULL
+================================================================================
+
+  SELECT name, price, description FROM products WHERE description IS NULL;
+  SELECT name, price, description FROM products WHERE description IS NOT NULL;
+
+--- Takrorlash (part1, 6-bo'lim) ---
+  NULL — bu QIYMAT EMAS, "qiymat yo'q / noma'lum" degan HOLAT.
+  Shuning uchun uni `=` bilan solishtirib bo'lmaydi.
+
+    WHERE description = NULL       -- HECH QACHON ishlamaydi
+    WHERE description IS NULL      -- TO'G'RI
+    WHERE description IS NOT NULL  -- TO'G'RI
+
+--- products jadvalida qayerda NULL bor? ---
+  01-faylda ataylab ikkita qatorga description = NULL qo'yilgan:
+    'USB-C Cable' -> description NULL
+    'Gel Pen'     -> description NULL
+  Shuning uchun IS NULL bu ikkitasini qaytaradi.
+
+  sku ham NULL bo'lishi mumkin (NOT NULL emas), lekin seed datada
+  hammasida qiymat bor.
+
+--- NULL bilan bog'liq amaliy funksiyalar ---
+  COALESCE(a, b, c)  -> birinchi NULL BO'LMAGANINI qaytaradi
+    SELECT name, COALESCE(description, 'Tavsif yo''q') AS descr
+    FROM products;
+
+  NULLIF(a, b)  -> a = b bo'lsa NULL, aks holda a
+    SELECT NULLIF(description, '') FROM products;   -- '' ni NULL ga aylantirish
+
+  Kombinatsiya (eng foydali pattern):
+    SELECT COALESCE(NULLIF(description, ''), 'Ma''lumot yo''q') FROM products;
+    -- NULL ham, bo'sh satr ham bir xil ishlov oladi
+
+  IS DISTINCT FROM  -> NULL-xavfsiz taqqoslash
+    WHERE description IS DISTINCT FROM 'desk'
+    -- NULL bo'lgan qatorlar HAM chiqadi
+
+--- NULL va AGREGAT funksiyalar ---
+  SELECT COUNT(*)           FROM products;  -- barcha qatorlar
+  SELECT COUNT(description) FROM products;  -- faqat NULL BO'LMAGANLAR
+  SELECT COUNT(sku)         FROM products;  -- sku bor bo'lganlar
+
+  Bu farq juda foydali: "nechta mahsulotda tavsif bor?" degan savolga
+  COUNT(description) darhol javob beradi.
+
+--- NULL ni sanash ---
+  SELECT
+    COUNT(*)                                        AS jami,
+    COUNT(description)                              AS tavsifi_bor,
+    COUNT(*) - COUNT(description)                   AS tavsifi_yoq,
+    COUNT(*) FILTER (WHERE description IS NULL)     AS tavsifi_yoq_2
+  FROM products;
+
+
+================================================================================
+10. ORDER BY — SARALASH
+================================================================================
+
+  SELECT name, price FROM products ORDER BY price DESC;
+  SELECT name, price, category FROM products ORDER BY price DESC, category ASC;
+
+--- Sintaksis ---
+  ORDER BY ustun [ASC | DESC] [, ustun2 [ASC | DESC], ...]
+
+  ASC  = Ascending  = o'sish tartibida (kichikdan kattaga). DEFAULT.
+  DESC = Descending = kamayish tartibida (kattadan kichikka).
+
+  `ASC` yozilmasa ham o'sish tartibida saralaydi.
+
+--- KO'P USTUNLI SARALASH ---
+  ORDER BY price DESC, category ASC
+
+  Ma'nosi: avval narx bo'yicha kamayish tartibida saralaydi.
+  AGAR ikki qatorning narxi BIR XIL bo'lsa — o'shalar orasida
+  kategoriya bo'yicha alifbo tartibida saralaydi.
+
+  Ya'ni ikkinchi ustun — TENGLIKNI BUZUVCHI (tie-breaker).
+
+  Amaliy misol:
+    ORDER BY category ASC, price DESC
+    -- kategoriya bo'yicha guruhlab ko'rsatadi, har guruh ichida
+    -- eng qimmatidan arzoniga qarab
+
+--- NULL LARNI SARALASH ---
+  PostgreSQL da DEFAULT:
+    ASC  -> NULL lar OXIRIDA (NULLS LAST)
+    DESC -> NULL lar BOSHIDA (NULLS FIRST)
+
+  Buni o'zgartirish mumkin:
+    ORDER BY description ASC  NULLS FIRST;
+    ORDER BY description DESC NULLS LAST;
+
+  Bu ko'pincha kerak bo'ladi: "tavsifi bor mahsulotlarni oldin ko'rsat".
+
+--- ALIAS va POZITSIYA bo'yicha saralash ---
+  SELECT name, price * stock AS total_value FROM products
+  ORDER BY total_value DESC;      -- ALIAS ishlaydi (ORDER BY SELECT dan keyin bajariladi)
+
+  SELECT name, price FROM products ORDER BY 2 DESC;
+  -- 2 = ikkinchi ustun (price). ISHLAYDI, lekin O'QISHGA YOMON.
+  -- Ustun tartibi o'zgarsa jimgina buziladi. QOCHISH KERAK.
+
+--- MATN SARALASH va COLLATION ---
+  Matn saralash TILGA bog'liq (collation). Masalan 'Ä' qayerga tushadi?
+  Katta-kichik harf ham ta'sir qiladi:
+    'Zebra' < 'apple'   -- ba'zi collation'larda, chunki ASCII da Z(90) < a(97)
+
+  Katta-kichik harfni e'tiborsiz saralash:
+    ORDER BY LOWER(name) ASC;
+
+  Joriy collation:
+    SHOW lc_collate;
+
+--- MUHIM: ORDER BY SIZ TARTIB KAFOLATLANMAYDI ---
+  ORDER BY yozmasang, PostgreSQL qatorlarni ISTALGAN tartibda qaytarishi
+  mumkin. Bugun bir xil chiqishi, ertaga boshqacha bo'lishi mumkin
+  (jadval yangilangandan keyin, parallel skan bo'lganda va h.k.).
+
+  "Odatda kiritish tartibida chiqadi" degan taxminga TAYANMANG.
+  Tartib kerak bo'lsa — ORDER BY YOZING. Bu qoidaning istisnosi yo'q.
+
+--- ORDER BY va TEZLIK ---
+  Saralash resurs talab qiladi. Katta jadvalda index yordam beradi:
+    CREATE INDEX idx_products_price ON products(price DESC);
+
+  Ko'p ustunli ORDER BY uchun mos index:
+    CREATE INDEX idx_products_cat_price ON products(category ASC, price DESC);
+
+  Tekshirish:
+    EXPLAIN ANALYZE SELECT name, price FROM products ORDER BY price DESC;
+    -- "Sort" ko'rsa -> saralash bajarilyapti
+    -- "Index Scan" ko'rsa -> index ishlatilyapti, saralashga hojat yo'q
+
+
+================================================================================
+11. LIMIT / OFFSET — SAHIFALASH (PAGINATION)
+================================================================================
+
+  SELECT name, price FROM products ORDER BY name ASC LIMIT 1;
+  SELECT name, price FROM products ORDER BY name ASC LIMIT 5 OFFSET 0;
+  SELECT name, price FROM products ORDER BY name ASC LIMIT 5 OFFSET 5;
+
+--- Ma'nosi ---
+  LIMIT n   -> maksimum n ta qator qaytar
+  OFFSET m  -> birinchi m ta qatorni O'TKAZIB YUBOR
+
+  Faylingdagi misol — bu klassik SAHIFALASH:
+    LIMIT 5 OFFSET 0    -> 1-sahifa (1-5 qatorlar)
+    LIMIT 5 OFFSET 5    -> 2-sahifa (6-10 qatorlar)
+    LIMIT 5 OFFSET 10   -> 3-sahifa (11-15 qatorlar)
+
+--- FORMULA ---
+  OFFSET = (sahifa_raqami - 1) * sahifa_hajmi
+
+  page=1, size=20  ->  LIMIT 20 OFFSET 0
+  page=2, size=20  ->  LIMIT 20 OFFSET 20
+  page=3, size=20  ->  LIMIT 20 OFFSET 40
+
+  Backend da:
+    offset := (page - 1) * pageSize
+    db.Query("SELECT ... ORDER BY name LIMIT $1 OFFSET $2", pageSize, offset)
+
+--- OLTIN QOIDA: LIMIT/OFFSET NI ORDER BY SIZ ISHLATMANG! ---
+  SELECT name FROM products LIMIT 5 OFFSET 5;   -- XAVFLI
+
+  ORDER BY bo'lmasa tartib kafolatlanmaydi. Natijada:
+    - 1-sahifada ko'rgan qator 2-sahifada YANA chiqishi mumkin
+    - ba'zi qatorlar HECH QACHON ko'rinmasligi mumkin
+
+  Har doim BARQAROR (deterministic) saralash kerak. Agar saralash
+  ustuni takrorlanuvchi bo'lsa, unikal ustun qo'shing:
+    ORDER BY price DESC, id ASC     -- id — tie-breaker, tartib barqaror
+
+--- OFFSET NING KATTA MUAMMOSI ---
+  OFFSET 100000 degani: baza 100000 ta qatorni O'QIYDI va TASHLAB YUBORADI,
+  keyin keyingi 20 tasini qaytaradi. Ya'ni sahifa raqami oshgani sari
+  so'rov SEKINLASHADI.
+
+    LIMIT 20 OFFSET 0        -> ~1 ms
+    LIMIT 20 OFFSET 100000   -> ~500 ms yoki undan ko'p
+
+  Yana bir muammo: agar sen 2-sahifani ko'rayotganingda kimdir
+  1-sahifadagi qatorni o'chirsa — bir qator BUTUNLAY O'TKAZIB
+  YUBORILADI (siljish muammosi).
+
+--- YECHIM: KEYSET PAGINATION (cursor / seek method) ---
+  OFFSET o'rniga "oxirgi ko'rgan qiymatdan keyingisini ber" deymiz:
+
+    -- 1-sahifa:
+    SELECT id, name, price FROM products
+    ORDER BY id ASC
+    LIMIT 5;
+
+    -- Keyingi sahifa (oxirgi ko'rgan id = <last_id>):
+    SELECT id, name, price FROM products
+    WHERE id > '<last_id>'
+    ORDER BY id ASC
+    LIMIT 5;
+
+  Ko'p ustunli saralash bilan:
+    WHERE (price, id) < (<last_price>, <last_id>)
+    ORDER BY price DESC, id DESC
+    LIMIT 20;
+
+  Afzalligi: sahifa raqamidan QAT'I NAZAR bir xil tez (index ishlatiladi).
+  Kamchiligi: "5-sahifaga sakrash" qilib bo'lmaydi, faqat "keyingi/oldingi".
+
+  Cheksiz scroll (infinite scroll) uchun IDEAL.
+
+--- Jami sonni bilish (total count) ---
+  Odatda API javobida "jami nechta" ham kerak bo'ladi:
+
+    SELECT COUNT(*) FROM products WHERE category = 'electronics';
+
+  Katta jadvalda COUNT(*) sekin. Taxminiy son yetarli bo'lsa:
+    SELECT reltuples::BIGINT FROM pg_class WHERE relname = 'products';
+
+--- FETCH — standart SQL shakli ---
+  SELECT name FROM products ORDER BY name
+  OFFSET 5 ROWS FETCH NEXT 5 ROWS ONLY;
+  -- LIMIT/OFFSET bilan bir xil, lekin SQL standarti. PostgreSQL ikkalasini
+  -- ham qo'llab-quvvatlaydi. Amalda LIMIT ko'proq ishlatiladi.
+
+
+================================================================================
+12. UPDATE — BITTA QATOR
+================================================================================
+
+  -- 1. AVVAL TEKSHIR
+  SELECT name, price, sku FROM products WHERE sku = 'ELEC-MOU-001';
+
+  -- 2. KEYIN O'ZGARTIR
+  UPDATE products SET
+      name  = 'none',
+      price = 55.66,
+      sku   = 'MOU-NEW-001'
+  WHERE sku = 'ELEC-MOU-001';
+
+  -- 3. NATIJANI TEKSHIR
+  SELECT name, price, sku FROM products WHERE sku = 'MOU-NEW-001';
+
+--- Sintaksis ---
+  UPDATE jadval
+  SET ustun1 = qiymat1,
+      ustun2 = qiymat2
+  WHERE shart;
+
+  SET dan keyin bir nechta ustun VERGUL bilan ajratiladi.
+  Oxirgisidan keyin vergul YO'Q.
+
+--- SELECT -> UPDATE -> SELECT PATTERNI ---
+  Faylingdagi tuzilma juda to'g'ri va bu ODATGA AYLANTIRISH KERAK:
+
+  1. SELECT bilan aynan QAYSI qatorlar o'zgarishini ko'rish
+  2. UPDATE bajarish (WHERE aynan o'sha)
+  3. SELECT bilan natijani tasdiqlash
+
+  Nega? Chunki UPDATE ni QAYTARIB BO'LMAYDI (agar tranzaksiyada bo'lmasa).
+  Noto'g'ri WHERE — va butun jadval buziladi.
+
+--- ENG XAVFLI XATO: WHERE NI UNUTISH ---
+  UPDATE products SET price = 0;
+  -- BARCHA MAHSULOTLAR NARXI 0 BO'LDI. Ortga yo'l yo'q.
+
+  Himoya usullari:
+  1. Har doim avval SELECT bilan tekshirish
+  2. Tranzaksiya ichida bajarish:
+
+       BEGIN;
+       UPDATE products SET price = 55.66 WHERE sku = 'ELEC-MOU-001';
+       -- psql "UPDATE 1" deb yozadi. Agar "UPDATE 8" desa -> xato!
+       SELECT name, price FROM products WHERE sku = 'ELEC-MOU-001';
+       COMMIT;      -- yoki ROLLBACK; agar noto'g'ri bo'lsa
+
+  3. RETURNING bilan darhol ko'rish (15-bo'limga qarang)
+
+--- psql NATIJA XABARI ---
+  UPDATE 1     -> 1 ta qator o'zgardi (kutilgani shu edi)
+  UPDATE 0     -> hech nima o'zgarmadi (WHERE hech nima topmadi)
+  UPDATE 8     -> 8 ta qator o'zgardi (agar 1 tani kutgan bo'lsang — MUAMMO)
+
+  Bu raqamga HAR DOIM E'TIBOR BERING.
+
+--- UPDATE va CONSTRAINT ---
+  UPDATE ham barcha constraint'larni tekshiradi:
+    UPDATE products SET price = -10 WHERE sku = 'ELEC-KEY-001';
+    -- ERROR: violates check constraint "products_price_check"
+
+    UPDATE products SET sku = 'ELEC-KEY-001' WHERE sku = 'ELEC-MOU-001';
+    -- ERROR: duplicate key value violates unique constraint
+
+  Bu yaxshi — baza o'zini himoya qiladi.
+
+--- Qaysi ustunlar o'zgarmaydi ---
+  SET da ko'rsatilmagan ustunlar TEGILMAYDI.
+  Ya'ni `id`, `created_at`, `stock`, `is_active`, `description` — o'z holicha
+  qoladi. Bu INSERT dan farqi (INSERT da ko'rsatilmagan ustun DEFAULT oladi).
+
+--- updated_at ustuni (amaliy maslahat) ---
+  Real loyihada har o'zgarishda vaqtni yozib borish kerak:
+    ALTER TABLE products ADD COLUMN updated_at TIMESTAMPTZ DEFAULT NOW();
+
+    UPDATE products SET price = 55.66, updated_at = NOW()
+    WHERE sku = 'ELEC-MOU-001';
+
+  Yoki TRIGGER bilan avtomatlashtirish (part3+ mavzusi).
+
+
+================================================================================
+13. UPDATE — BIR NECHTA QATOR
+================================================================================
+
+  SELECT name, category, price, is_active FROM products
+  WHERE category = 'stationery';
+
+  UPDATE products SET
+      price = ROUND(price * 1.10, 2)
+  WHERE category = 'stationery';
+
+  SELECT name, category, price, is_active FROM products
+  WHERE category = 'stationery';
+
+--- Nima bo'lyapti? ---
+  "stationery" kategoriyasidagi BARCHA mahsulotlar narxini 10% oshirish.
+
+  price * 1.10       -> 10% qo'shish
+  ROUND(..., 2)      -> 2 kasr xonagacha yaxlitlash
+
+  Natija:
+    Notebook: 99.00  -> 108.90
+    Gel Pen:  25.00  -> 27.50
+
+--- MUHIM TUSHUNCHA: UPDATE HAR BIR QATORDA ALOHIDA ISHLAYDI ---
+  `price = price * 1.10` ifodasi har bir qator uchun O'SHA QATORNING
+  o'z price qiymatini oladi. Bu "barchasini bir xil qiymatga o'rnatish"
+  emas — har biri o'z qiymatidan hisoblanadi.
+
+  Bu SQL ning TO'PLAM (set-based) tabiati: sikl (loop) yozish shart emas,
+  bitta so'rov barcha qatorlarga qo'llaniladi.
+
+--- ROUND funksiyasi ---
+  ROUND(son)            -> butun songacha yaxlitlaydi
+  ROUND(son, n)         -> n ta kasr xonagacha
+
+  DIQQAT: ROUND(x, n) ikki argumentli shakli FAQAT NUMERIC bilan ishlaydi.
+  DOUBLE PRECISION bilan xato beradi:
+    ROUND(1.5::double precision, 2)  -- ERROR: function round(double precision, integer) does not exist
+    ROUND(1.5::numeric, 2)           -- ishlaydi
+    ROUND(price::numeric, 2)         -- cast qilib ishlatish
+
+  Bizda price NUMERIC(10,2) bo'lgani uchun muammo yo'q.
+
+  Boshqa yaxlitlash funksiyalari:
+    CEIL(x)   / CEILING(x)  -> yuqoriga yaxlitlash  (10.1 -> 11)
+    FLOOR(x)                -> pastga yaxlitlash    (10.9 -> 10)
+    TRUNC(x, n)             -> kesish (yaxlitlamasdan)
+
+--- NUMERIC(10,2) va AVTOMATIK YAXLITLASH ---
+  Aslida ROUND ishlatmasang ham NUMERIC(10,2) o'zi 2 xonagacha yaxlitlaydi:
+    UPDATE products SET price = price * 1.10 WHERE category = 'stationery';
+    -- 99.00 * 1.10 = 108.9000 -> ustunga yozilganda 108.90 bo'ladi
+
+  Lekin ROUND ni ANIQ yozish YAXSHI amaliyot — niyating ko'rinib turadi
+  va ustun turi o'zgarsa ham to'g'ri ishlaydi.
+
+--- Ko'p qatorli UPDATE ning boshqa misollari ---
+  -- Omborda tugagan mahsulotlarni nofaol qilish
+  UPDATE products SET is_active = FALSE WHERE stock = 0;
+
+  -- Barcha narxlarni 15% chegirma bilan
+  UPDATE products SET price = ROUND(price * 0.85, 2)
+  WHERE category = 'electronics' AND is_active;
+
+  -- Shartli o'zgartirish (CASE bilan)
+  UPDATE products SET price = ROUND(
+      CASE
+          WHEN price > 10000 THEN price * 0.80    -- qimmatlarga 20% chegirma
+          WHEN price > 1000  THEN price * 0.90    -- o'rtachalarga 10%
+          ELSE price                              -- arzonlarga o'zgarish yo'q
+      END, 2);
+
+  -- Bir nechta ustunni birga
+  UPDATE products SET
+      stock = stock - 1,
+      is_active = (stock - 1 > 0)
+  WHERE sku = 'ELEC-KEY-001';
+
+--- XAVFSIZ ISHLASH USULI ---
+  Ko'p qatorni o'zgartirishdan oldin nechta qator ta'sirlanishini biling:
+
+    SELECT COUNT(*) FROM products WHERE category = 'stationery';
+    -- 2 ta chiqdi
+
+    BEGIN;
+    UPDATE products SET price = ROUND(price * 1.10, 2)
+    WHERE category = 'stationery';
+    -- "UPDATE 2" chiqishi kerak. Agar boshqa raqam bo'lsa:
+    ROLLBACK;
+    -- To'g'ri bo'lsa:
+    COMMIT;
+
+
+================================================================================
+14. DELETE — QATOR O'CHIRISH
+================================================================================
+
+  SELECT name, price FROM products;
+
+  DELETE FROM products WHERE sku = 'MOU-NEW-001';
+
+  SELECT name, price FROM products;
+
+--- Sintaksis ---
+  DELETE FROM jadval WHERE shart;
+
+  DIQQAT: `DELETE FROM` — `FROM` MAJBURIY.
+  (`DELETE products` — bu XATO, boshqa DBMS larda ishlashi mumkin, PG da yo'q.)
+
+--- ENG XAVFLI KOMANDA ---
+  DELETE FROM products;
+  -- WHERE YO'Q -> BUTUN JADVAL BO'SHAYDI
+
+  Bu UPDATE dagidan ham xavfliroq, chunki ma'lumot butunlay yo'qoladi.
+
+  MAJBURIY ODAT:
+  1. Avval SELECT bilan aynan nima o'chishini ko'rish:
+       SELECT * FROM products WHERE sku = 'MOU-NEW-001';
+  2. Keyin DELETE (WHERE aynan o'sha)
+  3. "DELETE 1" xabarini tekshirish
+
+  Yoki tranzaksiya:
+       BEGIN;
+       DELETE FROM products WHERE sku = 'MOU-NEW-001';
+       -- "DELETE 1" -> to'g'ri
+       SELECT COUNT(*) FROM products;
+       COMMIT;
+
+--- DELETE vs TRUNCATE vs DROP ---
+  DELETE FROM products WHERE ...;
+      Tanlangan qatorlarni o'chiradi. WHERE ishlatiladi.
+      Har bir qator alohida o'chadi -> sekinroq.
+      Tranzaksiyada ROLLBACK qilinadi.
+      Trigger'lar ishga tushadi.
+      Disk joyini darhol bo'shatmaydi (VACUUM kerak).
+
+  TRUNCATE products;
+      BARCHA qatorlarni o'chiradi. WHERE YO'Q.
+      Juda TEZ (fayllarni to'g'ridan-to'g'ri qisqartiradi).
+      Tranzaksiyada ROLLBACK qilinadi (PostgreSQL da — bu plyus).
+      Disk joyini darhol bo'shatadi.
+      TRUNCATE products RESTART IDENTITY;  -- SERIAL ni ham 1 ga qaytaradi
+
+  DROP TABLE products;
+      Jadvalning O'ZINI o'chiradi (struktura + ma'lumot).
+
+  Tanlash: bir nechta qator -> DELETE. Hammasi -> TRUNCATE. Jadval kerak
+  emas -> DROP.
+
+--- SOFT DELETE (real loyihalarda ko'p ishlatiladi) ---
+  Ma'lumotni haqiqatan o'chirish o'rniga "o'chirilgan" deb belgilash:
+
+    UPDATE products SET is_active = FALSE WHERE sku = 'ELEC-KEY-001';
+
+  So'rovlarda esa har doim filtrlash:
+    SELECT * FROM products WHERE is_active = TRUE;
+
+  Yoki alohida ustun:
+    ALTER TABLE products ADD COLUMN deleted_at TIMESTAMPTZ;
+    UPDATE products SET deleted_at = NOW() WHERE sku = '...';
+    SELECT * FROM products WHERE deleted_at IS NULL;
+
+  Afzalligi:
+    - ma'lumot yo'qolmaydi, tiklash mumkin
+    - audit / tarix saqlanadi
+    - bog'liq yozuvlar (buyurtmalar) buzilmaydi
+  Kamchiligi:
+    - har bir so'rovga filtr qo'shish kerak (unutish oson)
+    - jadval o'sib boradi
+
+  01-fayldagi `Old Monitor` (is_active = FALSE) — aynan shu patternning misoli.
+
+--- FOREIGN KEY va DELETE (part3 mavzusi, lekin bilib qo'ying) ---
+  Agar boshqa jadval bu qatorga havola qilsa, DELETE xato beradi:
+    ERROR: update or delete on table "products" violates foreign key constraint
+
+  Xatti-harakatni oldindan belgilash mumkin:
+    ON DELETE RESTRICT   -- o'chirishga ruxsat bermaydi (default)
+    ON DELETE CASCADE    -- bog'liq qatorlarni ham o'chiradi (EHTIYOT BO'L)
+    ON DELETE SET NULL   -- bog'liq ustunni NULL qiladi
+
+
+================================================================================
+15. RETURNING — O'ZGARGAN QATORNI QAYTARISH
+================================================================================
+
+  INSERT INTO products (name, category, price, sku, stock)
+  VALUES ('none', 'categoryy', 99.34, 'sskssu', 10)
+  RETURNING name, price;
+
+  UPDATE products SET
+      name = 'psql',
+      category = 'cat'
+  WHERE sku = 'sskssu'
+  RETURNING name, price;
+
+--- RETURNING nima qiladi? ---
+  Odatda INSERT / UPDATE / DELETE faqat "nechta qator o'zgardi" deb aytadi.
+  RETURNING esa O'ZGARGAN QATORLARNING O'ZINI qaytaradi — xuddi SELECT kabi.
+
+  Bu PostgreSQL ning kuchli xususiyati (hamma bazada yo'q).
+
+--- NEGA JUDA MUHIM? ---
+  1. AVTOMATIK GENERATSIYA QILINGAN QIYMATLARNI OLISH
+     products.id — UUID, DEFAULT gen_random_uuid(). INSERT dan keyin
+     bu ID ni QANDAY bilasan? Ikkinchi SELECT yozish kerakmi?
+
+     RETURNING bilan — bitta so'rovda:
+       INSERT INTO products (name, category, price, stock)
+       VALUES ('Test', 'electronics', 100, 5)
+       RETURNING id, created_at;
+
+     Bu SERIAL bilan ham xuddi shunday ishlaydi. Eski usul
+     (`SELECT currval('...')` yoki `SELECT MAX(id)`) — noto'g'ri va
+     parallel so'rovlarda XATO natija beradi. RETURNING — to'g'ri yo'l.
+
+  2. TARMOQ MUROJAATINI TEJASH
+     INSERT + SELECT = 2 ta murojaat. INSERT ... RETURNING = 1 ta.
+
+  3. RACE CONDITION dan HIMOYA
+     INSERT va keyingi SELECT o'rtasida boshqa kimdir qatorni
+     o'zgartirishi mumkin. RETURNING atomar — aynan sen kiritgan/o'zgartirgan
+     qatorni qaytaradi.
+
+  4. UPDATE/DELETE da ESKI yoki YANGI holatni ko'rish
+     UPDATE ... RETURNING  -> YANGI qiymatlarni qaytaradi
+     DELETE ... RETURNING  -> o'chirilgan qatorni qaytaradi (oxirgi ko'rish)
+
+--- SHAKLLARI ---
+  RETURNING *                    -- barcha ustunlar
+  RETURNING id                   -- faqat ID
+  RETURNING id, name, created_at -- tanlangan ustunlar
+  RETURNING id, price * 1.12 AS price_with_tax   -- ifoda ham mumkin
+
+--- Har bir komanda bilan ---
+  INSERT INTO products (name, category, price, stock)
+  VALUES ('X', 'y', 10, 1)
+  RETURNING id, created_at;
+
+  UPDATE products SET price = price * 1.1
+  WHERE category = 'stationery'
+  RETURNING id, name, price;        -- BARCHA o'zgargan qatorlarni qaytaradi
+
+  DELETE FROM products WHERE stock = 0
+  RETURNING id, name, price;        -- o'chirilganlarni ko'rish
+
+--- BACKEND KODDA (Go misoli) ---
+  var id string
+  var createdAt time.Time
+  err := db.QueryRow(`
+      INSERT INTO products (name, category, price, stock)
+      VALUES ($1, $2, $3, $4)
+      RETURNING id, created_at`,
+      name, category, price, stock,
+  ).Scan(&id, &createdAt)
+
+  Ko'p qator qaytsa `Query` + `rows.Next()` ishlatiladi.
+
+--- RETURNING + ON CONFLICT ---
+  INSERT INTO products (name, category, price, stock, sku)
+  VALUES ('X', 'y', 10, 1, 'SKU-1')
+  ON CONFLICT (sku) DO UPDATE SET price = EXCLUDED.price
+  RETURNING id, sku, price;
+  -- ham yangi kiritilgan, ham yangilangan qatorni qaytaradi
+
+  DIQQAT: `ON CONFLICT DO NOTHING` bo'lsa va konflikt yuz bersa —
+  RETURNING HECH NIMA qaytarmaydi (0 qator). Buni kodda hisobga oling.
+
+--- DELETE ... RETURNING bilan "arxivlash" ---
+  WITH deleted AS (
+      DELETE FROM products WHERE is_active = FALSE
+      RETURNING *
+  )
+  INSERT INTO products_archive SELECT * FROM deleted;
+  -- o'chirilgan qatorlarni boshqa jadvalga ko'chirish (CTE — part3 mavzusi)
+
+
+================================================================================
+16. QO'SHIMCHA BILISHI KERAK BO'LGAN NARSALAR
+================================================================================
+
+--- 16.1 DISTINCT — takrorlanishlarni olib tashlash ---
+  SELECT DISTINCT category FROM products;
+  -- electronics, furniture, stationery
+
+  SELECT DISTINCT category, is_active FROM products;
+  -- ikkalasining KOMBINATSIYASI unikal bo'ladi
+
+  DISTINCT ON (PostgreSQL kengaytmasi) — har guruhdan bittasini olish:
+    SELECT DISTINCT ON (category) category, name, price
+    FROM products
+    ORDER BY category, price DESC;
+    -- har kategoriyadan ENG QIMMAT mahsulot
+    -- MUHIM: ORDER BY birinchi DISTINCT ON ustuni bilan boshlanishi SHART
+
+--- 16.2 AGREGAT FUNKSIYALAR (part3 ga tayyorgarlik) ---
+  SELECT COUNT(*)      FROM products;                    -- qatorlar soni
+  SELECT COUNT(sku)    FROM products;                    -- NULL bo'lmaganlar
+  SELECT SUM(stock)    FROM products;                    -- yig'indi
+  SELECT AVG(price)    FROM products;                    -- o'rtacha
+  SELECT MIN(price), MAX(price) FROM products;           -- eng kichik/katta
+
+  Hammasi birga:
+    SELECT
+        COUNT(*)                 AS jami_mahsulot,
+        ROUND(AVG(price), 2)     AS ortacha_narx,
+        MIN(price)               AS eng_arzon,
+        MAX(price)               AS eng_qimmat,
+        SUM(stock)               AS jami_ombor,
+        SUM(price * stock)       AS ombor_qiymati
+    FROM products
+    WHERE is_active;
+
+  GROUP BY bilan (part3 da batafsil):
+    SELECT category, COUNT(*), ROUND(AVG(price), 2)
+    FROM products
+    GROUP BY category
+    ORDER BY COUNT(*) DESC;
+
+--- 16.3 CASE — shartli ifoda (SQL dagi if/else) ---
+  SELECT name, price,
+      CASE
+          WHEN price < 100    THEN 'arzon'
+          WHEN price < 5000   THEN 'o''rtacha'
+          ELSE                     'qimmat'
+      END AS narx_darajasi
+  FROM products;
+
+  Qisqa shakli (bitta qiymatni tekshirish):
+    CASE category
+        WHEN 'electronics' THEN 'Elektronika'
+        WHEN 'furniture'   THEN 'Mebel'
+        ELSE 'Boshqa'
+    END
+
+--- 16.4 FOYDALI MATN FUNKSIYALARI ---
+  LOWER(s) / UPPER(s)          -- kichik / katta harf
+  LENGTH(s)                    -- uzunlik
+  TRIM(s) / LTRIM / RTRIM      -- probellarni kesish
+  SUBSTRING(s FROM 1 FOR 5)    -- qism olish
+  REPLACE(s, 'a', 'b')         -- almashtirish
+  SPLIT_PART(s, '-', 1)        -- ajratgichga ko'ra bo'lakni olish
+  CONCAT(a, b, c)              -- birlashtirish (NULL-xavfsiz)
+  s || t                       -- birlashtirish (NULL bo'lsa natija NULL)
+  INITCAP(s)                   -- Har So'z Bosh Harfi
+
+  Misol — SKU dan kategoriya kodini olish:
+    SELECT sku, SPLIT_PART(sku, '-', 1) AS prefix FROM products;
+    -- ELEC-KEY-001 -> ELEC
+
+--- 16.5 FOYDALI SON FUNKSIYALARI ---
+  ROUND(x, n)   CEIL(x)   FLOOR(x)   ABS(x)
+  MOD(a, b)     POWER(a, b)   SQRT(x)
+  GREATEST(a, b, c)  -- eng kattasi
+  LEAST(a, b, c)     -- eng kichigi
+
+--- 16.6 TRANZAKSIYALAR (takrorlash) ---
+  BEGIN;
+      UPDATE products SET stock = stock - 1 WHERE sku = 'ELEC-KEY-001';
+      INSERT INTO orders (product_sku, qty) VALUES ('ELEC-KEY-001', 1);
+  COMMIT;
+
+  Ikkalasi ham bajariladi yoki ikkalasi ham bekor bo'ladi.
+
+  Xato bo'lsa:
+      ROLLBACK;
+
+  Xavfli operatsiyalar uchun ODAT:
+      BEGIN;  ->  operatsiya  ->  SELECT bilan tekshir  ->  COMMIT / ROLLBACK
+
+--- 16.7 EXPLAIN — so'rov qanday bajarilishini ko'rish ---
+  EXPLAIN SELECT * FROM products WHERE category = 'electronics';
+  EXPLAIN ANALYZE SELECT * FROM products WHERE category = 'electronics';
+
+  ANALYZE — so'rovni haqiqatan bajaradi va real vaqtni ko'rsatadi.
+  DIQQAT: EXPLAIN ANALYZE UPDATE/DELETE ni HAQIQATAN bajaradi!
+  Tekshirish uchun tranzaksiyada qiling:
+      BEGIN; EXPLAIN ANALYZE UPDATE ...; ROLLBACK;
+
+  Nimaga qarash kerak:
+    Seq Scan     -> butun jadval o'qildi (kichik jadvalda normal)
+    Index Scan   -> index ishlatildi (yaxshi)
+    Sort         -> saralash bajarildi
+    rows=N       -> nechta qator qayta ishlandi
+
+--- 16.8 SQL INJECTION — XAVFSIZLIK ---
+  HECH QACHON foydalanuvchi ma'lumotini SQL satriga yopishtirmang:
+
+    -- XAVFLI:
+    query := "SELECT * FROM products WHERE name = '" + userInput + "'"
+    -- userInput = "'; DROP TABLE products; --"  -> jadval yo'q bo'ladi
+
+    -- TO'G'RI (parametrlangan so'rov):
+    db.Query("SELECT * FROM products WHERE name = $1", userInput)
+
+  Parametrlar bazaga ALOHIDA yuboriladi va hech qachon kod sifatida
+  bajarilmaydi. Bu yagona ishonchli himoya.
+
+
+================================================================================
+17. SQL BAJARILISH TARTIBI (JUDA MUHIM)
+================================================================================
+
+SQL ni YOZISH tartibi va BAJARILISH tartibi HAR XIL. Buni bilish
+ko'p chalkashlikni yo'q qiladi.
+
+YOZILISH tartibi:
+    SELECT -> FROM -> WHERE -> GROUP BY -> HAVING -> ORDER BY -> LIMIT
+
+BAJARILISH tartibi (mantiqiy):
+    1. FROM      -> qaysi jadvaldan
+    2. WHERE     -> qatorlarni filtrlash
+    3. GROUP BY  -> guruhlash
+    4. HAVING    -> guruhlarni filtrlash
+    5. SELECT    -> ustunlarni tanlash / hisoblash  <-- ALIAS SHU YERDA TUG'ILADI
+    6. DISTINCT  -> takrorlanishni olib tashlash
+    7. ORDER BY  -> saralash
+    8. LIMIT     -> qatorlar sonini cheklash
+
+--- BU NIMANI TUSHUNTIRADI? ---
+
+  1. NEGA WHERE da ALIAS ISHLATIB BO'LMAYDI?
+     SELECT price * 1.12 AS total FROM products WHERE total > 100;
+     -- ERROR: column "total" does not exist
+
+     Chunki WHERE (2-qadam) SELECT (5-qadam) dan OLDIN bajariladi —
+     `total` hali mavjud emas.
+
+     Yechim: ifodani takrorlash yoki subquery:
+       WHERE price * 1.12 > 100
+       -- yoki:
+       SELECT * FROM (SELECT price * 1.12 AS total FROM products) t
+       WHERE t.total > 100;
+
+  2. NEGA ORDER BY da ALIAS ISHLAYDI?
+     SELECT price * 1.12 AS total FROM products ORDER BY total DESC;
+     -- ISHLAYDI
+
+     Chunki ORDER BY (7-qadam) SELECT (5-qadam) dan KEYIN — `total`
+     allaqachon mavjud.
+
+  3. NEGA WHERE da AGREGAT ISHLATIB BO'LMAYDI?
+     SELECT category FROM products WHERE COUNT(*) > 2;
+     -- ERROR: aggregate functions are not allowed in WHERE
+
+     Chunki WHERE guruhlashdan (GROUP BY, 3-qadam) OLDIN ishlaydi.
+     Guruhlardan keyin filtrlash uchun HAVING:
+       SELECT category, COUNT(*) FROM products
+       GROUP BY category HAVING COUNT(*) > 2;
+
+  4. WHERE vs HAVING FARQI:
+     WHERE  -> QATORLARNI filtrlaydi (guruhlashdan OLDIN)
+     HAVING -> GURUHLARNI filtrlaydi (guruhlashdan KEYIN)
+
+  5. LIMIT ENG OXIRIDA — shuning uchun ORDER BY siz LIMIT ma'nosiz.
+
+
+================================================================================
+18. TEZ-TEZ UCHRAYDIGAN XATOLAR VA TUZOQLAR
+================================================================================
+
+  "column "electronics" does not exist"
+      -> Qo'shtirnoq xato: "electronics" o'rniga 'electronics'.
+         Bitta qo'shtirnoq = qiymat, ikkitasi = ustun nomi.
+
+  "duplicate key value violates unique constraint "products_sku_key""
+      -> Bunday sku allaqachon bor. Boshqa sku bering yoki
+         ON CONFLICT DO NOTHING/UPDATE ishlating.
+
+  "new row for relation "products" violates check constraint "products_price_check""
+      -> price manfiy. CHECK (price >= 0) buzildi.
+
+  "null value in column "category" violates not-null constraint"
+      -> NOT NULL ustunga qiymat berilmadi.
+
+  "relation "products" does not exist"
+      -> 01_sql_concepts_base_file.sql ishga tushirilmagan,
+         yoki noto'g'ri bazaga ulanilgan (\conninfo bilan tekshiring).
+
+  "column "total" does not exist" (WHERE da alias)
+      -> 17-bo'limga qarang. WHERE da alias ishlamaydi.
+
+  "function round(double precision, integer) does not exist"
+      -> ROUND(x::numeric, 2) qilib cast qiling.
+
+  "syntax error at or near ..."
+      -> odatda vergul ortiqcha/kam, yoki qavs yopilmagan.
+         Ko'pincha xato KO'RSATILGAN QATORDAN OLDINGISIDA bo'ladi.
+
+  LIKE hech nima topmayapti
+      -> katta-kichik harf. ILIKE ishlating.
+      -> % qo'yishni unutgansiz: 'usb' (aniq mos) vs 'usb%' (boshlanadi).
+
+  NOT IN hech nima qaytarmayapti
+      -> ro'yxatda yoki ustunda NULL bor. 8-bo'limga qarang.
+
+  WHERE x = NULL hech nima topmayapti
+      -> IS NULL ishlating.
+
+  UPDATE / DELETE kutilganidan ko'p qatorga ta'sir qildi
+      -> WHERE noto'g'ri yoki unutilgan. psql dagi "UPDATE N" raqamini
+         HAR DOIM tekshiring. Tranzaksiya ishlatib odat qiling.
+
+  Pagination da qatorlar takrorlanyapti / yo'qolyapti
+      -> ORDER BY yo'q yoki barqaror emas. Unikal ustun (id) qo'shing.
+
+  AND/OR aralashganda natija kutilmagan
+      -> QAVS qo'ying. AND, OR dan kuchliroq.
+
+  Sana bo'yicha BETWEEN oxirgi kunni tashlab ketyapti
+      -> >= boshlanish AND < keyingi_kun ishlating.
+
+
+================================================================================
+19. CHEAT SHEET
+================================================================================
+
+--- CRUD ---
+  INSERT INTO t (a, b) VALUES (1, 2), (3, 4) RETURNING id;
+  SELECT a, b FROM t WHERE ... ORDER BY ... LIMIT n OFFSET m;
+  UPDATE t SET a = 1 WHERE ... RETURNING *;
+  DELETE FROM t WHERE ... RETURNING *;
+
+--- WHERE OPERATORLARI ---
+  =  <>  !=  >  <  >=  <=
+  AND  OR  NOT                    -- qavs qo'ying! NOT > AND > OR
+  LIKE 'abc%'                     -- katta-kichik farq qiladi
+  ILIKE '%abc%'                   -- farq qilmaydi (PostgreSQL)
+  IN ('a', 'b')                   -- ro'yxatdan biri
+  NOT IN ('a')                    -- NULL TUZOG'I BOR!
+  BETWEEN 10 AND 20               -- ikki tomonlama inklyuziv
+  IS NULL  /  IS NOT NULL         -- = NULL ishlamaydi
+  IS DISTINCT FROM x              -- NULL-xavfsiz taqqoslash
+
+--- WILDCARDS ---
+  %   -> 0 yoki ko'p belgi
+  _   -> aniq bitta belgi
+  'a%'  -> index ishlaydi (tez)
+  '%a%' -> index ishlamaydi (sekin)
+
+--- SARALASH va SAHIFALASH ---
+  ORDER BY price DESC, id ASC     -- ikkinchisi tie-breaker
+  ORDER BY x ASC NULLS LAST
+  LIMIT 20 OFFSET 40              -- 3-sahifa (size=20)
+  OFFSET = (page - 1) * size
+  LIMIT/OFFSET -> HAR DOIM ORDER BY bilan
+
+--- NULL BILAN ISHLASH ---
+  IS NULL / IS NOT NULL
+  COALESCE(a, b)                  -- birinchi NULL bo'lmagani
+  NULLIF(a, b)                    -- teng bo'lsa NULL
+  COALESCE(NULLIF(x, ''), 'yo''q')-- NULL va '' ni birga hal qilish
+
+--- XAVFSIZLIK QOIDALARI ---
+  1. UPDATE/DELETE dan OLDIN SELECT bilan tekshir
+  2. WHERE ni unutma
+  3. Xavfli operatsiyani BEGIN ... COMMIT ichida bajar
+  4. "UPDATE N" / "DELETE N" raqamini tekshir
+  5. Foydalanuvchi ma'lumotini $1, $2 parametr sifatida uzat
+
+--- BAJARILISH TARTIBI ---
+  FROM -> WHERE -> GROUP BY -> HAVING -> SELECT -> DISTINCT -> ORDER BY -> LIMIT
+  (WHERE da alias YO'Q, ORDER BY da alias BOR)
+
+--- PSQL ---
+  \dt   \d products   \x auto   \timing   \i fayl.sql   \conninfo   \q
+
+
+================================================================================
+PART2 FAYLLARI RO'YXATI
+================================================================================
+  01_sql_concepts_base_file.sql              — products jadvali + seed data
+  02_insert_signle_row.sql                   — bitta qator INSERT
+  03_insert_multiple_rows.sql                — ko'p qator INSERT + IN
+  04_select_specefic_cols_vs_select_star.sql — SELECT ustunlar + AS alias
+  05_where_basic_filter.sql                  — WHERE asoslari
+  06_and_or_not.sql                          — AND / OR / NOT
+  07_like_ilike_patterns.sql                 — LIKE / ILIKE / % / _
+  08_in_not_in_between.sql                   — IN / NOT IN / BETWEEN
+  09_null_is_not_null.sql                    — IS NULL / IS NOT NULL
+  10_order_by.sql                            — ORDER BY, ko'p ustunli
+  11_limit_offset_pagination.sql             — LIMIT / OFFSET / pagination
+  12_update_single_row.sql                   — UPDATE bitta qator
+  13_update_multiple_rows.sql                — UPDATE ko'p qator + ROUND
+  14_delete_rows.sql                         — DELETE
+  15_returning_after_insert.sql              — RETURNING
+
+================================================================================
+                              PART2 TUGADI
+   Keyingi qadam (part3): FOREIGN KEY va jadvallar aloqasi, JOIN turlari
+   (INNER/LEFT/RIGHT/FULL), GROUP BY va HAVING, agregat funksiyalar,
+   subquery, CTE (WITH), VIEW, INDEX chuqurroq, normalizatsiya.
+================================================================================

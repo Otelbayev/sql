@@ -1,0 +1,1347 @@
+================================================================================
+                POSTGRESQL — PART 3 KONSPEKT
+   (Jadvallar aloqasi: FOREIGN KEY, JOIN, agregatlar, GROUP BY, index)
+================================================================================
+
+MUNDARIJA
+---------
+0.  Part3 ga kirish — relatsion baza g'oyasi
+1.  Baza sxemasi: users, posts, comments, tags, post_tags (reset & seed)
+2.  FOREIGN KEY — tashqi kalit
+3.  One-to-Many (bir-ko'pga) aloqa
+4.  INNER JOIN
+5.  LEFT JOIN
+6.  Many-to-Many (ko'p-ko'pga) aloqa va bog'lovchi jadval
+7.  Table aliases (jadval taxalluslari) va ko'p JOIN
+8.  Aggregate functions (agregat funksiyalar)
+9.  GROUP BY va HAVING
+10. COUNT(DISTINCT ...)
+11. Subqueries (ichki so'rovlar)
+12. Indexes (indekslar)
+13. Transactions (tranzaksiyalar)
+14. JOIN turlari — to'liq xarita
+15. SQL bajarilish tartibi (GROUP BY / HAVING konteksti)
+16. Qo'shimcha bilishi kerak bo'lgan narsalar
+17. Tez-tez uchraydigan xatolar va tuzoqlar
+18. Cheat sheet
+
+
+================================================================================
+0. PART3 GA KIRISH — RELATSION BAZA G'OYASI
+================================================================================
+
+Part1 — struktura (table, tiplar, constraint).
+Part2 — bitta jadval bilan CRUD (INSERT/SELECT/UPDATE/DELETE, filtrlash).
+Part3 — KO'P JADVAL BIR-BIRIGA BOG'LANGANDA. Bu SQL ning eng muhim qismi.
+
+--- Nega ma'lumotni bir nechta jadvalga bo'lamiz? ---
+  Tasavvur qil: barcha ma'lumot BITTA jadvalda bo'lsa:
+
+    | post_title      | author_name | author_email | tag1 | tag2 | comment1 |
+    ...
+
+  Muammolar:
+    1. TAKRORLANISH: bir muallif 100 ta post yozsa, ismi 100 marta yoziladi.
+    2. YANGILASH ANOMALIYASI: muallif ismini o'zgartirsa — 100 joyni o'zgartirish.
+    3. NULL to'lqini: postda 5 ta tag, boshqasida 0 ta -> tag2..tag5 bo'sh.
+    4. NOMUVOFIQLIK: bir joyda 'None', boshqasida 'none' yozilib qolishi mumkin.
+
+  YECHIM — NORMALIZATSIYA: ma'lumotni mantiqiy bo'laklarga ajratib, alohida
+  jadvallarga joylash va ularni KALITLAR (key) orqali bog'lash.
+
+    users     -> muallif faqat bir marta yoziladi
+    posts     -> har post user_id orqali muallifga bog'lanadi
+    comments  -> har izoh post_id orqali postga bog'lanadi
+    tags      -> har tag bir marta
+    post_tags -> qaysi post qaysi tag bilan bog'liq (bog'lovchi jadval)
+
+--- Aloqa turlari (bu part3 ning skeletisi) ---
+  1:1  (one-to-one)   -> har A ga bitta B (kam uchraydi)
+  1:N  (one-to-many)  -> bir A ga ko'p B     [users -> posts]
+  N:M  (many-to-many) -> ko'p A ga ko'p B    [posts <-> tags]
+
+--- Terminal orqali ishga tushirish ---
+  # Bazani tayyorlash:
+  psql -U postgres -d postgresql_part1 -f part3/01_reset_and_seed_relationship.sql
+
+  # Keyin har bir faylni:
+  psql -U postgres -d postgresql_part1 -f part3/04_inner_join.sql
+
+  # psql ichidan:
+  \i /Users/none/Desktop/postgresql/part3/01_reset_and_seed_relationship.sql
+
+  Foydali:
+  \d posts        -- jadval + foreign key + indexlarni ko'rish
+  \d+ posts       -- to'liqroq
+  \di             -- barcha indexlar
+  \x auto         -- keng natijalarni vertikal ko'rsatish
+
+
+================================================================================
+1. BAZA SXEMASI — RESET & SEED (01-fayl)
+================================================================================
+
+  CREATE EXTENSION IF NOT EXISTS pgcrypto;
+
+  DROP TABLE IF EXISTS post_tags;
+  DROP TABLE IF EXISTS comments;
+  DROP TABLE IF EXISTS posts;
+  DROP TABLE IF EXISTS tags;
+  DROP TABLE IF EXISTS users;
+
+--- DROP TARTIBI MUHIM! (BOG'LIQLIKKA TESKARI) ---
+  Jadvallar bir-biriga foreign key bilan bog'langan. "Bola" (child) jadvalni
+  "ota" (parent) dan OLDIN o'chirish kerak, aks holda xato:
+     ERROR: cannot drop table users because other objects depend on it
+
+  Bog'liqlik zanjiri:
+     post_tags -> posts, tags       (eng "past", oldin o'chadi)
+     comments  -> posts
+     posts     -> users
+     tags      (mustaqil, faqat post_tags unga bog'liq)
+     users     (eng "yuqori", oxirida o'chadi)
+
+  Shuning uchun tartib: post_tags -> comments -> posts -> tags -> users.
+
+  Muqobil: DROP TABLE ... CASCADE; — bog'liq hamma narsani ham o'chiradi
+  (lekin bu XAVFLI, ehtiyot bo'l):
+     DROP TABLE IF EXISTS users CASCADE;
+
+--- JADVALLAR ---
+
+  users:
+    id   UUID PRIMARY KEY DEFAULT gen_random_uuid()
+    name TEXT NOT NULL
+    -> Eng oddiy "ota" jadval.
+
+  posts:
+    id      UUID PRIMARY KEY
+    user_id UUID NOT NULL REFERENCES users(id)      <-- FOREIGN KEY
+    title   TEXT NOT NULL
+    status  TEXT NOT NULL DEFAULT 'draft'
+            CHECK (status IN ('draft', 'published')) <-- ENUM o'rniga CHECK
+    views   INTEGER NOT NULL DEFAULT 0 CHECK (views >= 0)
+    -> Har post BITTA foydalanuvchiga tegishli (user_id orqali). 1:N.
+
+  comments:
+    id      UUID PRIMARY KEY
+    post_id UUID NOT NULL REFERENCES posts(id)       <-- FOREIGN KEY
+    body    TEXT NOT NULL
+    -> Har izoh BITTA postga tegishli. 1:N.
+
+  tags:
+    id   UUID PRIMARY KEY
+    name TEXT NOT NULL UNIQUE                         <-- takrorlanmas nom
+    -> Mustaqil jadval.
+
+  post_tags:  (BOG'LOVCHI / JUNCTION jadval)
+    post_id UUID NOT NULL REFERENCES posts(id)
+    tag_id  UUID NOT NULL REFERENCES tags(id)
+    PRIMARY KEY (post_id, tag_id)                     <-- COMPOSITE PK
+    -> posts va tags ni bog'laydi. N:M.
+
+--- COMPOSITE (KOMPOZIT) PRIMARY KEY ---
+  PRIMARY KEY (post_id, tag_id)
+
+  Ma'nosi: primary key IKKI ustundan iborat. Bir post + bir tag JUFTLIGI
+  takrorlanmaydi. Ya'ni bitta postga bir tag ikki marta biriktirib bo'lmaydi.
+  Lekin:
+    - bitta post -> ko'p tag (post_id takrorlanadi, lekin juftlik unikal)
+    - bitta tag  -> ko'p post (tag_id takrorlanadi)
+  Aynan many-to-many uchun kerakli xatti-harakat.
+
+--- SEED: JUDA MUHIM PATTERN — INSERT ... SELECT ---
+  Diqqat qil, muallif ID sini QO'LDA yozmagan (UUID ni bilib bo'lmaydi ham):
+
+    INSERT INTO posts (user_id, title, status, views)
+    SELECT id, 'Postgresql joins explained', 'published', 100
+    FROM users
+    WHERE name = 'None';
+
+  Bu nima qiladi?
+    1. users dan name='None' bo'lgan qatorning ID sini TOPADI
+    2. o'sha ID ni user_id sifatida yangi postga qo'yadi
+
+  Ya'ni VALUES o'rniga SELECT natijasini kiritadi. Bu foreign key qiymatini
+  QATTIQ KODLAMASDAN, nom orqali bog'lash imkonini beradi. UUID lar bilan
+  ishlashda BU YAGONA aqlli yo'l.
+
+  post_tags ni to'ldirish yanada qiziq — IKKI jadvaldan ID oladi:
+    INSERT INTO post_tags (post_id, tag_id)
+    SELECT p.id, t.id
+    FROM posts p, tags t                    <-- CROSS JOIN (dekart ko'paytma)
+    WHERE p.title = 'Postgresql joins explained' AND t.name = 'sql';
+
+    `FROM posts p, tags t` -> barcha post × barcha tag kombinatsiyasi,
+    keyin WHERE bittasini tanlaydi -> aynan kerakli (post, tag) juftligi.
+
+--- SEED MA'LUMOTINING TUZILISHI (keyingi bo'limlarni tushunish uchun) ---
+  users:
+    None      -> "Postgresql joins explained" (published, 100 views)
+                 "Indexes of beginners"       (draft, 140 views)
+    Jasurbek  -> "Backend apis with psql"     (published, 140 views)
+
+  comments:
+    "Backend apis with psql"      -> "Please add more examples"
+    "Postgresql joins explained"  -> "Very clear explanation"
+    "Indexes of beginners"        -> IZOHSIZ (bu LEFT JOIN da NULL beradi!)
+
+  tags: sql, backend
+  post_tags:
+    "Postgresql joins explained" -> sql
+    "Indexes of beginners"       -> sql
+    "Backend apis with psql"     -> backend
+
+  Bu ataylab shunday tuzilgan: izohsiz post, teglanmagan holatlar —
+  JOIN turlarining farqini ko'rsatish uchun.
+
+--- Oxirgi qator: SELECT '...' AS MESSAGE ---
+  SELECT 'Part 3 ... successfully' AS MESSAGE;
+  Bu jadvaldan o'qimaydi — shunchaki matn qaytaradi. Skript oxirida
+  "muvaffaqiyatli tugadi" degan tasdiq ko'rsatish uchun qulay usul.
+
+
+================================================================================
+2. FOREIGN KEY — TASHQI KALIT
+================================================================================
+
+  -- 02-fayl faqat ID larni ko'rsatadi:
+  SELECT id FROM users;
+  SELECT user_id, title FROM posts;
+  -- Maqsad: posts.user_id qiymatlari users.id ga MOS kelishini ko'rish.
+
+--- FOREIGN KEY nima? ---
+  Bir jadvaldagi ustun BOSHQA jadvalning primary key iga HAVOLA qilishi.
+
+    user_id UUID NOT NULL REFERENCES users(id)
+
+  Ma'nosi: posts.user_id da faqat users.id da MAVJUD bo'lgan qiymat
+  bo'lishi mumkin.
+
+--- FOREIGN KEY NIMANI KAFOLATLAYDI? (REFERENTIAL INTEGRITY) ---
+  1. Mavjud bo'lmagan user ga post yozib bo'lmaydi:
+       INSERT INTO posts (user_id, title) VALUES ('random-uuid', 'X');
+       -- ERROR: insert or update on table "posts" violates foreign key
+       --        constraint "posts_user_id_fkey"
+
+  2. Postlari bor user ni o'chirib bo'lmaydi (default xatti-harakat):
+       DELETE FROM users WHERE name = 'None';
+       -- ERROR: update or delete on table "users" violates foreign key
+       --        constraint "posts_user_id_fkey" on table "posts"
+
+  Ya'ni baza "yetim" (orphan) yozuvlarni — otasi yo'q bolalarni —
+  paydo bo'lishiga YO'L QO'YMAYDI. Bu ma'lumot butunligini ta'minlaydi.
+
+--- ON DELETE / ON UPDATE — o'chirilganda nima bo'lsin? ---
+  FOREIGN KEY ni e'lon qilishda xatti-harakatni belgilash mumkin:
+
+    user_id UUID REFERENCES users(id) ON DELETE RESTRICT   -- (default)
+                 bog'liq post bo'lsa, user o'chirilmaydi
+
+    user_id UUID REFERENCES users(id) ON DELETE CASCADE
+                 user o'chirilsa, uning HAMMA POSTLARI ham o'chadi
+                 (EHTIYOT BO'L — zanjirli o'chirish)
+
+    user_id UUID REFERENCES users(id) ON DELETE SET NULL
+                 user o'chirilsa, posts.user_id = NULL bo'ladi
+                 (bu holda user_id NOT NULL BO'LMASLIGI kerak)
+
+    ON DELETE NO ACTION   -- RESTRICT ga o'xshash, lekin tekshiruv
+                             tranzaksiya oxiriga kechiktiriladi
+
+  Bu loyihada aniq ko'rsatilmagan, ya'ni DEFAULT = RESTRICT/NO ACTION.
+
+--- FOREIGN KEY ni keyin qo'shish ---
+  ALTER TABLE posts
+    ADD CONSTRAINT posts_user_id_fkey
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE;
+
+--- FOREIGN KEY ustuniga INDEX (muhim optimallashtirish) ---
+  PostgreSQL foreign key ustuniga AVTOMATIK index YARATMAYDI!
+  (Primary key ga yaratadi, foreign key ga yo'q.)
+
+  posts.user_id ga index qo'yish kerak, aks holda:
+    - JOIN sekin ishlaydi
+    - user o'chirilganda bog'liqlikni tekshirish sekin
+
+    CREATE INDEX idx_posts_user_id ON posts(user_id);
+
+  QOIDA: deyarli har bir foreign key ustuniga index qo'ying.
+
+--- ENUM o'rniga CHECK IN(...) ---
+  status TEXT NOT NULL DEFAULT 'draft' CHECK (status IN ('draft', 'published'))
+
+  Bu — "enum" ni ifodalashning oddiy usuli. status faqat 'draft' yoki
+  'published' bo'lishi mumkin. Boshqa qiymat kirsa xato.
+
+  Muqobil — haqiqiy ENUM tur:
+    CREATE TYPE post_status AS ENUM ('draft', 'published');
+    status post_status NOT NULL DEFAULT 'draft';
+
+  CHECK IN(...) afzalligi: yangi qiymat qo'shish oson (ALTER ... DROP/ADD
+  CONSTRAINT). ENUM afzalligi: qat'iyroq, kam joy. O'rganishda CHECK yetarli.
+
+
+================================================================================
+3. ONE-TO-MANY (BIR-KO'PGA) ALOQA
+================================================================================
+
+  SELECT
+      users.name  AS author_name,
+      posts.title AS post_title,
+      posts.status
+  FROM users
+  INNER JOIN posts
+      ON users.id = posts.user_id
+  ORDER BY users.name, posts.title;
+
+--- 1:N aloqa nima? ---
+  BIR user -> KO'P post. Lekin BIR post -> faqat BITTA user.
+  "Bir" tomon: users. "Ko'p" tomon: posts.
+
+  Qanday amalga oshiriladi?
+    "KO'P" tomondagi jadval ("posts") "BIR" tomonning ID sini saqlaydi
+    (user_id). Foreign key HAR DOIM "ko'p" tomonda turadi.
+
+  Boshqa 1:N misollar bu bazada:
+    posts (bir) -> comments (ko'p)   [comments.post_id]
+
+--- JOIN — ikki jadvalni birlashtirish ---
+  users va posts alohida jadvallar. JOIN ularni bitta natijaga qo'shadi:
+
+    FROM users
+    INNER JOIN posts ON users.id = posts.user_id
+
+  `ON users.id = posts.user_id` — bu ULANISH SHARTI (join condition).
+  "users ning id si posts ning user_id iga teng bo'lgan qatorlarni juftla."
+
+  Natija (seed data bilan):
+    author_name | post_title                  | status
+    ------------+-----------------------------+----------
+    Jasurbek    | Backend apis with psql      | published
+    None        | Indexes of beginners        | draft
+    None        | Postgresql joins explained  | published
+
+  "None" ikki marta chiqadi — chunki uning 2 ta posti bor. Bu 1:N ning
+  tabiiy natijasi: "bir" tomon "ko'p" tomon qatorlari soniga qarab
+  takrorlanadi.
+
+
+================================================================================
+4. INNER JOIN
+================================================================================
+
+  SELECT
+      users.name  AS author_name,
+      posts.title AS post_title,
+      posts.status,
+      posts.views
+  FROM posts
+  INNER JOIN users
+      ON posts.user_id = users.id
+  WHERE posts.status = 'published'
+  ORDER BY posts.views ASC;
+
+--- INNER JOIN nima qiladi? ---
+  FAQAT HAR IKKI jadvalda ham MOS keladigan qatorlarni qaytaradi.
+  Ya'ni "kesishma" (intersection).
+
+  posts.user_id = users.id sharti bajarilgan juftliklarNIGINA oladi.
+  Agar biror postning user_id si hech qaysi user.id ga mos kelmasa
+  (bu yerda bo'lmaydi, chunki NOT NULL + FK bor) — u tushib qoladi.
+  Agar biror userning posti bo'lmasa — u ham tushib qoladi.
+
+--- Faylning natijasi (izohlangan) ---
+  WHERE posts.status = 'published'  -> faqat chop etilganlar
+  ORDER BY posts.views ASC          -> ko'rishlar bo'yicha o'sish tartibida
+
+    author_name | post_title                  | status    | views
+    ------------+-----------------------------+-----------+------
+    None        | Postgresql joins explained  | published |  100
+    Jasurbek    | Backend apis with psql      | published |  140
+
+  "Indexes of beginners" (draft) TUSHIB QOLDI — WHERE tufayli.
+
+--- JOIN YO'NALISHI INNER da AHAMIYATSIZ ---
+  Bu ikkisi BIR XIL natija beradi (INNER uchun):
+    FROM posts INNER JOIN users ON ...
+    FROM users INNER JOIN posts ON ...
+  INNER JOIN kommutativ — tartib muhim emas. (LEFT/RIGHT da esa MUHIM!)
+
+--- ON vs WHERE ---
+  ON    -> jadvallarni QANDAY bog'lash (join sharti)
+  WHERE -> bog'langandan keyin qatorlarni FILTRLASH
+
+  INNER JOIN da ikkalasini WHERE ga qo'shsa ham natija bir xil, lekin
+  MANTIQAN join sharti ON da, filtr WHERE da bo'lishi to'g'ri va o'qishga oson.
+  (LEFT JOIN da esa ON va WHERE FARQ QILADI — 5-bo'limga qarang.)
+
+--- Faylning boshidagi ikki SELECT ---
+  SELECT id, name FROM users;
+  SELECT user_id, title, status, views FROM posts;
+  -> JOIN dan oldin xom ma'lumotni ko'rsatib, keyin birlashgan natijani
+     solishtirish uchun. O'rganishga juda foydali usul.
+
+
+================================================================================
+5. LEFT JOIN
+================================================================================
+
+  SELECT
+      posts.title    AS post_title,
+      comments.body  AS comment_body
+  FROM posts
+  LEFT JOIN comments
+      ON posts.id = comments.post_id
+  ORDER BY posts.title;
+
+--- LEFT JOIN (= LEFT OUTER JOIN) nima qiladi? ---
+  CHAP jadvalning (FROM dan keyingisi = posts) BARCHA qatorlarini oladi.
+  O'ng jadvaldan (comments) MOS kelganini qo'shadi.
+  MOS KELMASA — o'ng tomon ustunlari NULL bo'ladi.
+
+  Ya'ni "chap jadvaldan hech kim tushib qolmaydi".
+
+--- Faylning natijasi (ENG MUHIM QISM) ---
+    post_title                  | comment_body
+    ----------------------------+--------------------------
+    Backend apis with psql      | Please add more examples
+    Indexes of beginners        |                          <-- NULL!
+    Postgresql joins explained  | Very clear explanation
+
+  "Indexes of beginners" postining IZOHI YO'Q. INNER JOIN bo'lganda bu qator
+  BUTUNLAY TUSHIB QOLARDI. LEFT JOIN esa uni SAQLAYDI, comment_body = NULL.
+
+  MANA SHU — LEFT JOIN ning butun mohiyati:
+  "chap tomondagi hamma narsani ko'rsat, o'ng tomonda mos bo'lsa qo'sh,
+   bo'lmasa NULL qo'y".
+
+--- QACHON LEFT JOIN KERAK? ---
+  "Bog'liq yozuvi BO'LMAGANLARNI ham ko'rsatish" kerak bo'lganda:
+    - Barcha postlar + izohlari (izohsizlar ham)
+    - Barcha userlar + postlari (postsizlar ham)
+    - Barcha mahsulotlar + buyurtmalari (sotilmaganlar ham)
+
+--- "TOPILMAGANLARNI" ANIQLASH (anti-join) ---
+  LEFT JOIN + IS NULL = "juftligi yo'q qatorlar":
+
+    -- Izohi bo'lmagan postlar:
+    SELECT posts.title
+    FROM posts
+    LEFT JOIN comments ON posts.id = comments.post_id
+    WHERE comments.id IS NULL;
+    -- natija: "Indexes of beginners"
+
+  Bu juda kuchli pattern: "postsiz userlar", "buyurtmasiz mijozlar" va h.k.
+
+--- LEFT JOIN da ON va WHERE FARQI (nozik, lekin muhim) ---
+  ON ga qo'yilgan shart -> juftlashda ishlatiladi, chap qatorlar SAQLANADI.
+  WHERE ga qo'yilgan shart -> juftlashdan KEYIN, NULL larni tashlab yuborishi mumkin.
+
+    -- Faqat 'published' izohli postlar, LEKIN izohsiz postlar ham qolsin:
+    SELECT p.title, c.body
+    FROM posts p
+    LEFT JOIN comments c ON p.id = c.post_id AND c.body ILIKE '%clear%';
+    -- shart ON da -> mos kelmagan izohlar NULL, lekin post qoladi
+
+    -- Buni WHERE ga qo'ysang:
+    ... LEFT JOIN comments c ON p.id = c.post_id
+        WHERE c.body ILIKE '%clear%';
+    -- WHERE c.body ... -> NULL body li qatorlar TUSHIB QOLADI
+    -- natijada LEFT JOIN INNER JOIN ga aylanib qoladi!
+
+  QOIDA: LEFT JOIN da o'ng jadval shartini ON ga qo'y, WHERE ga emas
+  (agar chap qatorlarni saqlamoqchi bo'lsang).
+
+--- RIGHT JOIN ---
+  LEFT ning aksi — O'NG jadvalning hammasini oladi. Amalda kam ishlatiladi,
+  chunki jadvallar tartibini almashtirib LEFT JOIN qilish odatiy:
+    A RIGHT JOIN B  ==  B LEFT JOIN A
+
+
+================================================================================
+6. MANY-TO-MANY (KO'P-KO'PGA) ALOQA
+================================================================================
+
+  SELECT
+      posts.title AS post_title,
+      tags.name   AS tag_name
+  FROM posts
+  INNER JOIN post_tags ON posts.id = post_tags.post_id
+  INNER JOIN tags      ON post_tags.tag_id = tags.id
+  ORDER BY posts.title, tags.name;
+
+--- N:M aloqa nima? ---
+  BIR post -> KO'P tag.  VA  BIR tag -> KO'P post.
+  Ikki tomon ham "ko'p". Buni to'g'ridan-to'g'ri foreign key bilan
+  ifodalab BO'LMAYDI.
+
+--- YECHIM: BOG'LOVCHI JADVAL (junction / bridge / link table) ---
+  post_tags jadvali IKKALASINI bog'laydi:
+
+    post_tags:
+      post_id -> posts(id)
+      tag_id  -> tags(id)
+      PRIMARY KEY (post_id, tag_id)
+
+  Har QATOR = bitta post va bitta tag o'rtasidagi BITTA bog'lanish.
+
+    post_id (post)                 | tag_id (tag)
+    -------------------------------+-------------
+    Postgresql joins explained     | sql
+    Indexes of beginners           | sql
+    Backend apis with psql         | backend
+
+  N:M aslida IKKITA 1:N ga bo'linadi:
+    posts (1) -> post_tags (N)
+    tags  (1) -> post_tags (N)
+
+--- IKKITA JOIN NEGA KERAK? ---
+  posts va tags o'rtasida TO'G'RIDAN-TO'G'RI aloqa yo'q. post_tags ORQALI
+  o'tish kerak. Shuning uchun IKKI POG'ONALI JOIN:
+
+    posts --(posts.id = post_tags.post_id)--> post_tags
+    post_tags --(post_tags.tag_id = tags.id)--> tags
+
+  Natija:
+    post_title                  | tag_name
+    ----------------------------+---------
+    Backend apis with psql      | backend
+    Indexes of beginners        | sql
+    Postgresql joins explained  | sql
+
+--- Bir postning hamma taglarini bitta qatorda ko'rsatish ---
+  SELECT
+      posts.title,
+      STRING_AGG(tags.name, ', ' ORDER BY tags.name) AS tags
+  FROM posts
+  LEFT JOIN post_tags ON posts.id = post_tags.post_id
+  LEFT JOIN tags      ON post_tags.tag_id = tags.id
+  GROUP BY posts.id, posts.title;
+  -- STRING_AGG -> 'sql, backend' kabi birlashtiradi (agregat, 8-bo'lim)
+
+--- N:M da LEFT JOIN — teglanmagan postlar ---
+  Yuqoridagi INNER JOIN da TEGI YO'Q post bo'lsa tushib qolardi.
+  Barcha postlarni (tegsizlar ham) ko'rish uchun LEFT JOIN ishlatiladi.
+  (Bu bazada har postda tag bor, lekin qoida shu.)
+
+
+================================================================================
+7. TABLE ALIASES (JADVAL TAXALLUSLARI) va KO'P JOIN
+================================================================================
+
+  SELECT
+      p.title  AS post_title,
+      p.status,
+      p.views,
+      u.name   AS author_name,
+      c.body
+  FROM posts AS p
+  INNER JOIN users    AS u ON p.user_id = u.id
+  LEFT  JOIN comments AS c ON p.id = c.post_id
+  ORDER BY p.views DESC;
+
+--- Jadval aliasi nima? ---
+  Jadvalga qisqa nom berish:
+    FROM posts AS p        -- `posts` o'rniga `p`
+    FROM posts p           -- AS ni tashlash mumkin
+
+  Endi `posts.title` o'rniga `p.title` deb yozasan.
+
+--- NEGA KERAK? ---
+  1. QISQALIK: ko'p JOIN da to'liq nom yozish zerikarli.
+       posts.title, users.name, comments.body   -> p.title, u.name, c.body
+  2. BIR JADVALNI O'ZIGA JOIN qilganda (self-join) — MAJBURIY:
+       FROM users u1 INNER JOIN users u2 ON u1.manager_id = u2.id
+       -- aliasa bo'lmasa qaysi "users" ekanini ajratib bo'lmaydi
+  3. BIR XIL USTUN NOMI bo'lganda aniqlik:
+       posts.id va users.id — ikkalasi ham `id`. Qaysi biri? p.id / u.id.
+
+--- USTUN NOMI CHALKASHLIGI (ambiguity) ---
+  Agar ikki jadvalda `id` bor bo'lsa va shunchaki `id` yozsang:
+    ERROR: column reference "id" is ambiguous
+  Yechim: har doim alias/jadval nomi bilan aniqlashtir: p.id, u.id.
+
+--- BU FAYLDA INNER + LEFT ARALASH ---
+  INNER JOIN users  -> har postning MUALLIFI ALBATTA bor (NOT NULL FK),
+                       shuning uchun INNER yetarli (hech kim tushmaydi)
+  LEFT JOIN comments -> izoh BO'LMASLIGI mumkin, shuning uchun LEFT
+                        (izohsiz postlar ham qolsin)
+
+  Bu — real hayotda tez-tez uchraydigan aralash pattern: "majburiy
+  bog'liqlik -> INNER, ixtiyoriy bog'liqlik -> LEFT".
+
+--- DIQQAT: LEFT JOIN + comments qatorni KO'PAYTIRISHI mumkin ---
+  Agar postda 3 ta izoh bo'lsa, u post 3 marta chiqadi (har izoh uchun).
+  Bu JOIN ning tabiati. Agar "har post bitta qator" kerak bo'lsa ->
+  GROUP BY + agregat (STRING_AGG, COUNT) ishlatiladi.
+
+
+================================================================================
+8. AGGREGATE FUNCTIONS (AGREGAT FUNKSIYALAR)
+================================================================================
+
+  SELECT
+      COUNT(*)                                   AS total_posts,
+      COUNT(*) FILTER (WHERE status='published') AS published_posts,
+      SUM(views)                                 AS total_views,
+      AVG(views)                                 AS average_views,
+      MIN(views)                                 AS min_views,
+      MAX(views)                                 AS max_views
+  FROM posts;
+
+--- Agregat funksiya nima? ---
+  KO'P QATORNI BITTA qiymatga "yig'adi" (aggregate = jamlash).
+  Butun jadval (yoki guruh) bo'yicha yagona natija chiqaradi.
+
+  COUNT(*)   -> qatorlar soni
+  COUNT(x)   -> x NULL BO'LMAGAN qatorlar soni
+  SUM(x)     -> yig'indi
+  AVG(x)     -> o'rtacha
+  MIN(x)     -> eng kichik
+  MAX(x)     -> eng katta
+
+--- Natija (seed data bilan) ---
+  total_posts=3, published_posts=2, total_views=380,
+  average_views=126.66..., min_views=100, max_views=140
+
+--- COUNT(*) vs COUNT(ustun) vs COUNT(DISTINCT ustun) ---
+  COUNT(*)              -> BARCHA qatorlar (NULL lar ham)
+  COUNT(views)          -> views NULL BO'LMAGAN qatorlar
+  COUNT(DISTINCT views) -> takrorlanmas views qiymatlari soni
+  Bizda views: 100, 140, 140 -> COUNT(*)=3, COUNT(DISTINCT views)=2
+
+--- FILTER (WHERE ...) — SHARTLI AGREGAT (juda foydali) ---
+  COUNT(*) FILTER (WHERE status='published')
+
+  Bu PostgreSQL ning kuchli xususiyati: agregatni FAQAT shartga mos
+  qatorlarga qo'llaydi. Bitta so'rovda turli kesimlarni sanash:
+
+    SELECT
+        COUNT(*)                                   AS jami,
+        COUNT(*) FILTER (WHERE status='published') AS chop_etilgan,
+        COUNT(*) FILTER (WHERE status='draft')     AS qoralama,
+        SUM(views) FILTER (WHERE status='published') AS chop_views
+    FROM posts;
+
+  Eski (uzunroq) muqobili — CASE bilan:
+    COUNT(CASE WHEN status='published' THEN 1 END)
+    SUM(CASE WHEN status='published' THEN views ELSE 0 END)
+
+--- NULL va AGREGATLAR (juda muhim) ---
+  Agregatlar NULL larni O'TKAZIB YUBORADI (COUNT(*) dan tashqari):
+    - SUM/AVG/MIN/MAX -> NULL larni hisobga olmaydi
+    - AVG -> bo'luvchidan ham NULL larni chiqaradi (0 dan farqli!)
+       Masalan [10, 20, NULL] -> AVG = 15 (30/2), 10 emas (30/3)
+
+  BO'SH natijada (0 qator):
+    COUNT(*) -> 0
+    SUM      -> NULL (0 EMAS!)   -> COALESCE(SUM(x), 0) bilan himoyalan
+    AVG/MIN/MAX -> NULL
+
+--- AVG ni yaxlitlash ---
+  AVG(views) -> 126.666666...  (uzun)
+  Yaxlitlash:
+    ROUND(AVG(views), 2)              -- 126.67
+    ROUND(AVG(views)::numeric, 2)     -- agar AVG double qaytarsa cast
+
+
+================================================================================
+9. GROUP BY va HAVING
+================================================================================
+
+  SELECT
+      u.name       AS author_name,
+      COUNT(p.id)  AS total_posts,
+      SUM(p.views) AS total_views
+  FROM users AS u
+  LEFT JOIN posts AS p ON u.id = p.user_id
+  GROUP BY u.id, u.name
+  HAVING COUNT(p.id) = 1;
+
+--- GROUP BY nima qiladi? ---
+  Qatorlarni GURUHLARGA bo'ladi va HAR GURUH uchun agregat hisoblaydi.
+  8-bo'limda agregat BUTUN jadvalga edi. GROUP BY bilan — HAR GURUHGA.
+
+  `GROUP BY u.id, u.name` -> har muallif bo'yicha alohida guruh:
+    None guruhi     -> uning postlari yig'iladi
+    Jasurbek guruhi -> uning postlari yig'iladi
+
+--- OLTIN QOIDA: SELECT dagi HAR USTUN yo GROUP BY da, yo AGREGAT ichida ---
+  SELECT da agregatga o'ralmagan ustun -> GROUP BY da bo'lishi SHART.
+
+    SELECT u.name, COUNT(p.id) FROM ... GROUP BY u.id, u.name;   -- OK
+    SELECT u.name, p.title, COUNT(*) FROM ... GROUP BY u.id;     -- XATO!
+       -- ERROR: column "p.title" must appear in the GROUP BY clause
+       --        or be used in an aggregate function
+
+  Sababi: bir guruhda ko'p title bor — qaysi birini ko'rsatsin? Noaniq.
+
+--- NEGA GROUP BY u.id, u.name (ikkalasi)? ---
+  u.id — primary key, guruhlash uchun yetarli va unikal.
+  u.name — SELECT da chiqadi, shuning uchun qo'shilgan.
+  (PostgreSQL da primary key bo'yicha guruhlaganda name ni qo'shmasa ham
+   ishlaydi — funktsional bog'liqlik. Lekin ikkalasini yozgan aniqroq va
+   portativroq.)
+
+--- HAVING vs WHERE (ENG MUHIM FARQ) ---
+  WHERE  -> guruhlashDAN OLDIN, ALOHIDA QATORLARNI filtrlaydi
+  HAVING -> guruhlashDAN KEYIN, GURUHLARNI (agregat natijani) filtrlaydi
+
+    HAVING COUNT(p.id) = 1   -> faqat AYNAN 1 ta posti bor mualliflar
+
+  WHERE da agregat ishlatib BO'LMAYDI:
+    WHERE COUNT(p.id) = 1    -- ERROR: aggregate functions are not allowed in WHERE
+    HAVING COUNT(p.id) = 1   -- TO'G'RI
+
+  Ikkalasini birga ishlatish (tez-tez):
+    SELECT u.name, COUNT(*) FROM users u
+    JOIN posts p ON u.id = p.user_id
+    WHERE p.status = 'published'      -- avval qatorlarni filtrla
+    GROUP BY u.id, u.name
+    HAVING COUNT(*) > 1;              -- keyin guruhlarni filtrla
+
+--- BU FAYLDAGI LEFT JOIN + COUNT TUZOG'I (juda muhim) ---
+  LEFT JOIN posts ... GROUP BY ... COUNT(p.id)
+
+  Nega COUNT(*) EMAS, COUNT(p.id)?
+    LEFT JOIN da posti YO'Q user ham qatorda qoladi, lekin p.* ustunlari NULL.
+    - COUNT(*)    -> o'sha NULL qatorni ham sanaydi -> postsiz userga 1 beradi (XATO!)
+    - COUNT(p.id) -> p.id NULL bo'lgani uchun sanamaydi -> to'g'ri 0 beradi
+
+  QOIDA: LEFT JOIN dan keyin COUNT qilsang — HAR DOIM o'ng jadvalning
+  NOT NULL ustunini (odatda p.id) sana, COUNT(*) emas.
+
+  Natija (HAVING COUNT=1 bilan):
+    Bu bazada Jasurbek 1 post, None 2 post -> faqat Jasurbek chiqadi.
+    (Agar postsiz user bo'lsa, COUNT(p.id)=0 -> HAVING=1 dan o'tmaydi.)
+
+--- GROUP BY bilan tez-tez kerak bo'ladigan namunalar ---
+  -- Har status bo'yicha nechta post va o'rtacha views:
+  SELECT status, COUNT(*), ROUND(AVG(views),1)
+  FROM posts GROUP BY status;
+
+  -- Har muallif, eng ommabop postining views i:
+  SELECT u.name, MAX(p.views)
+  FROM users u JOIN posts p ON u.id=p.user_id
+  GROUP BY u.id, u.name;
+
+  -- Guruhni agregat bo'yicha saralash (ORDER BY da agregat MUMKIN):
+  SELECT status, COUNT(*) AS cnt FROM posts
+  GROUP BY status ORDER BY cnt DESC;
+
+
+================================================================================
+10. COUNT(DISTINCT ...)
+================================================================================
+
+  SELECT
+      t.name AS tag_name,
+      COUNT(DISTINCT p.id) AS total_posts
+  FROM tags AS t
+  LEFT JOIN post_tags ON t.id = post_tags.tag_id
+  LEFT JOIN posts AS p ON post_tags.post_id = p.id
+  GROUP BY t.id, t.name
+  ORDER BY total_posts DESC;
+
+--- Maqsad ---
+  Har tag NECHTA postda ishlatilgan? tags -> post_tags -> posts orqali.
+
+  Natija:
+    tag_name | total_posts
+    ---------+------------
+    sql      | 2
+    backend  | 1
+
+--- NEGA DISTINCT KERAK? ---
+  Ko'p JOIN qator KO'PAYTIRADI. Agar bir post bir tagga BIR NECHTA yo'l
+  bilan bog'lansa (yoki boshqa JOIN qator ko'paytirsa), o'sha post
+  bir necha marta sanaladi -> COUNT xato ko'p bo'ladi.
+
+  COUNT(DISTINCT p.id) -> har postni FAQAT BIR MARTA sanaydi.
+    COUNT(p.id)          -> takroriy juftliklarni ham sanaydi (xavfli)
+    COUNT(DISTINCT p.id) -> unikal postlar (to'g'ri)
+
+  QOIDA: N:M JOIN dan keyin "nechta X" ni sanayotganda deyarli har doim
+  COUNT(DISTINCT x.id) ishlat.
+
+--- LEFT JOIN bu yerda ham muhim ---
+  Agar bir tag hech qaysi postga biriktirilmagan bo'lsa, INNER JOIN uni
+  butunlay tushirib yuborardi. LEFT JOIN uni saqlaydi va COUNT(DISTINCT
+  p.id) = 0 chiqadi ("ishlatilmagan taglar").
+
+--- COUNT(DISTINCT) va TEZLIK ---
+  DISTINCT sanash resurs talab qiladi (saralash/hash kerak). Kichik
+  jadvalda muammo yo'q. Juda katta jadvalda taxminiy son yetsa
+  -> APPROX_COUNT_DISTINCT (extension) yoki boshqa usullar bor.
+
+
+================================================================================
+11. SUBQUERIES (ICHKI SO'ROVLAR)
+================================================================================
+
+  SELECT title, status, views
+  FROM posts
+  WHERE views > (SELECT AVG(views) FROM posts);
+
+--- Subquery nima? ---
+  Boshqa so'rov ICHIDAGI so'rov. Qavs ichida yoziladi va avval u bajariladi,
+  natijasi tashqi so'rovda ishlatiladi.
+
+  Bu misolda:
+    1. (SELECT AVG(views) FROM posts) -> avval o'rtacha views hisoblanadi (126.66)
+    2. tashqi so'rov -> views > 126.66 bo'lgan postlarni qaytaradi
+
+  Natija: views=140 bo'lganlar (o'rtachadan yuqori):
+    "Backend apis with psql" (140), "Indexes of beginners" (140)
+
+--- NEGA BITTA SO'ROVDA QILIB BO'LMAYDI? ---
+  WHERE views > AVG(views)   -- XATO!
+     ERROR: aggregate functions are not allowed in WHERE
+
+  Agregatni WHERE da to'g'ridan-to'g'ri ishlatib bo'lmaydi (15-bo'lim,
+  bajarilish tartibi). Subquery bu muammoni hal qiladi — o'rtachani
+  ALOHIDA hisoblab, keyin solishtiradi.
+
+--- SUBQUERY TURLARI ---
+  1. SKALYAR (bitta qiymat qaytaradi) — yuqoridagi misol:
+       WHERE views > (SELECT AVG(views) FROM posts)
+
+  2. RO'YXAT (IN bilan, ko'p qiymat):
+       SELECT * FROM posts
+       WHERE user_id IN (SELECT id FROM users WHERE name = 'None');
+
+  3. KORRELYATSION (tashqi so'rovga bog'liq, har qator uchun qayta ishlaydi):
+       SELECT u.name,
+              (SELECT COUNT(*) FROM posts p WHERE p.user_id = u.id) AS post_count
+       FROM users u;
+
+  4. EXISTS / NOT EXISTS (mavjudlikni tekshirish, juda samarali):
+       -- Kamida bitta posti bor userlar:
+       SELECT name FROM users u
+       WHERE EXISTS (SELECT 1 FROM posts p WHERE p.user_id = u.id);
+
+       -- Umuman posti yo'q userlar:
+       SELECT name FROM users u
+       WHERE NOT EXISTS (SELECT 1 FROM posts p WHERE p.user_id = u.id);
+
+  5. FROM ichida (derived table / subquery jadval sifatida):
+       SELECT status, AVG(cnt) FROM (
+           SELECT status, user_id, COUNT(*) AS cnt
+           FROM posts GROUP BY status, user_id
+       ) t
+       GROUP BY status;
+
+--- SUBQUERY vs JOIN vs CTE ---
+  Ko'p holatda subquery ni JOIN bilan ham yozsa bo'ladi. Odatda:
+    - "filtrlash / mavjudlik" -> EXISTS / IN subquery
+    - "ustun qo'shish / birlashtirish" -> JOIN
+    - "murakkab, ko'p bosqichli" -> CTE (WITH), o'qishga eng qulay
+
+--- CTE (WITH) — subquery ning o'qishga qulay shakli ---
+  WITH avg_views AS (
+      SELECT AVG(views) AS v FROM posts
+  )
+  SELECT title, views FROM posts, avg_views
+  WHERE views > avg_views.v;
+
+  CTE murakkab so'rovni "nomlangan bosqichlarga" bo'ladi. Bir necha marta
+  ishlatiladigan subquery uchun ideal. (Chuqurroq — keyingi partlarda.)
+
+
+================================================================================
+12. INDEXES (INDEKSLAR)
+================================================================================
+
+  SELECT id, title, views, status FROM posts WHERE status = 'published';
+
+  CREATE INDEX IF NOT EXISTS idx_posts_status ON posts(status);
+
+  CREATE INDEX IF NOT EXISTS idx_posts_status_views ON posts(status, views DESC);
+
+--- Index nima? ---
+  Kitobning MUNDARIJASI/ALFAVIT KO'RSATKICHI kabi. Indexsiz baza kerakli
+  qatorni topish uchun BUTUN JADVALNI o'qiydi (Sequential Scan / Seq Scan).
+  Index bilan — to'g'ridan-to'g'ri sakraydi (Index Scan).
+
+  SELECT / WHERE / JOIN / ORDER BY ni TEZLASHTIRADI.
+
+--- NIMANING EVAZIGA? (index bepul emas) ---
+  1. DISK JOYI egallaydi.
+  2. INSERT/UPDATE/DELETE ni SEKINLASHTIRADI — har yozuvda index ham
+     yangilanishi kerak.
+  3. Kerak bo'lmagan index shunchaki ortiqcha yuk.
+
+  QOIDA: tez-tez WHERE/JOIN/ORDER BY da ishlatiladigan ustunlarga index
+  qo'y. Ko'p yoziladigan, kam qidiriladigan jadvalda ehtiyot bo'l.
+
+--- BITTA USTUNLI vs KOMPOZIT (ko'p ustunli) INDEX ---
+  idx_posts_status              -> WHERE status = ... ni tezlashtiradi
+  idx_posts_status_views        -> WHERE status = ... AND/ORDER BY views ni
+
+  Kompozit index (status, views DESC):
+    - WHERE status = 'published' ORDER BY views DESC  -> IDEAL mos keladi
+      (avval status bo'yicha topadi, keyin views allaqachon saralangan)
+
+--- USTUNLAR TARTIBI KOMPOZIT INDEXDA MUHIM (left-prefix qoidasi) ---
+  (status, views) index quyidagilarga yordam beradi:
+    WHERE status = ...                      -> HA (birinchi ustun)
+    WHERE status = ... AND views > ...       -> HA
+    WHERE status = ... ORDER BY views        -> HA
+  LEKIN:
+    WHERE views = ...  (status siz)          -> YO'Q (birinchi ustun o'tkazilgan)
+
+  Ya'ni index CHAPDAN o'qiladi. Birinchi ustunni tashlab, faqat
+  ikkinchisini qidirsang — index ishlamaydi.
+
+--- views DESC — nega tartib ko'rsatilgan? ---
+  ON posts(status, views DESC)
+
+  ORDER BY views DESC tez-tez ishlatilsa, indexni ham DESC tartibda
+  qurish qo'shimcha saralashni yo'q qiladi. "Eng ko'p ko'rilgan postlar"
+  ro'yxati uchun ideal.
+
+--- IF NOT EXISTS ---
+  CREATE INDEX IF NOT EXISTS ... -> index allaqachon bo'lsa xato bermaydi.
+  Skriptni qayta ishga tushirish uchun (idempotent).
+
+--- INDEX ISHLAYAPTIMI? EXPLAIN bilan tekshirish ---
+  EXPLAIN ANALYZE
+  SELECT * FROM posts WHERE status = 'published';
+
+  Natijada:
+    "Seq Scan on posts"    -> index ISHLAMAYAPTI (butun jadval o'qildi)
+    "Index Scan using idx_posts_status" -> index ISHLADI
+
+  DIQQAT: KICHIK jadvalda (bizdagi kabi 3 qator) PostgreSQL indexni
+  ATAYLAB ISHLATMAYDI — butun jadvalni o'qish tezroq. Bu NORMAL.
+  Index faqat katta jadvalda (minglab+ qator) foyda beradi.
+
+--- INDEX TURLARI (qisqacha) ---
+  B-TREE  -> default. =, <, >, BETWEEN, ORDER BY uchun. Eng ko'p ishlatiladi.
+  HASH    -> faqat = uchun.
+  GIN     -> JSONB, massiv, full-text qidiruv uchun.
+  GiST    -> geometrik, oraliq tiplar uchun.
+  BRIN    -> juda katta, tartiblangan jadvallar uchun (masalan vaqt qatori).
+
+--- MAXSUS INDEXLAR ---
+  UNIQUE index (UNIQUE constraint avtomatik yaratadi):
+    CREATE UNIQUE INDEX idx_tags_name ON tags(name);
+
+  PARTIAL (qisman) index — faqat kerakli qatorlarga:
+    CREATE INDEX idx_published ON posts(views) WHERE status = 'published';
+    -- faqat published postlarni indexlaydi -> kichikroq, tezroq
+
+  EXPRESSION (ifoda bo'yicha) index:
+    CREATE INDEX idx_lower_title ON posts(LOWER(title));
+    -- WHERE LOWER(title) = ... ni tezlashtiradi
+
+--- INDEXLARNI KO'RISH / O'CHIRISH ---
+  \di                              -- barcha indexlar (psql)
+  \d posts                         -- posts ning indexlari
+  DROP INDEX idx_posts_status;
+  DROP INDEX IF EXISTS idx_posts_status;
+
+--- 12-fayldagi XATO (diqqat qiling!) ---
+  SELECT title, views status FROM posts WHERE status = 'published';
+                      ^^^^^^^^^^^^
+  Bu yerda `views status` — vergul TUSHIB QOLGAN. PostgreSQL buni
+  "views ustunini `status` deb ata" (alias) deb tushunadi. Ya'ni faqat
+  IKKI ustun chiqadi: title va (views nomi status bo'lgan holda).
+  Ehtimol niyat `title, views, status` (uch ustun) bo'lgan.
+  To'g'risi:  SELECT title, views, status FROM posts WHERE ...;
+
+
+================================================================================
+13. TRANSACTIONS (TRANZAKSIYALAR)
+================================================================================
+
+  BEGIN;
+
+  UPDATE posts SET views = views + 200
+  WHERE title = 'Indexes of beginners' AND status = 'draft';
+
+  UPDATE posts SET status = 'published'
+  WHERE title = 'Indexes of beginners' AND status = 'draft';
+
+  SELECT title, status, views FROM posts
+  WHERE title = 'Indexes of beginners' AND status = 'published';
+
+  CREATE INDEX IF NOT EXISTS idx_posts_title_status ON posts(title, status);
+
+  COMMIT;
+
+--- Tranzaksiya nima? ---
+  Bir nechta amalni BITTA BO'LINMAS BLOKGA birlashtirish.
+  "HAMMASI bajariladi YOKI HECH BIRI" (all-or-nothing).
+
+    BEGIN;    -> tranzaksiyani boshlash
+    ...       -> amallar
+    COMMIT;   -> tasdiqlash (o'zgarishlar SAQLANADI)
+    ROLLBACK; -> bekor qilish (HAMMASI qaytariladi, hech nima o'zgarmaydi)
+
+--- BU FAYLDA NIMA BO'LYAPTI? ---
+  "Indexes of beginners" postini chop etish jarayoni, IKKI qadamda:
+    1. views ga +200 qo'sh (140 -> 340)
+    2. status ni 'draft' -> 'published' qil
+
+  Bu ikki amal BIRGA bajarilishi kerak. Agar 1-si bajarilib, 2-si
+  (masalan tok o'chib) bajarilmasa — post views i oshgan, lekin hali
+  draft holatda qoladi (nomuvofiq holat). Tranzaksiya buni oldini oladi:
+  yo ikkalasi ham, yo hech biri.
+
+--- NOZIK DETAL: IKKINCHI UPDATE va SHART ---
+  1-UPDATE:  WHERE ... status = 'draft'  -> topadi, views +200
+  2-UPDATE:  WHERE ... status = 'draft'  -> HALI draft (1-UPDATE statusni
+             o'zgartirmadi) -> topadi, published qiladi
+
+  Ya'ni tranzaksiya ICHIDA o'zgarishlar ketma-ket ko'rinadi. 1-UPDATE dan
+  keyin ham status hali 'draft' (chunki uni faqat 2-UPDATE o'zgartiradi).
+  Agar 1-UPDATE statusni o'zgartirganda edi, 2-UPDATE shartga tushmay
+  qolardi. Bu yerda tartib to'g'ri qo'yilgan.
+
+--- ACID xususiyatlari ---
+  A - Atomicity   -> hammasi yoki hech nima
+  C - Consistency -> baza doim to'g'ri (constraint) holatda qoladi
+  I - Isolation   -> parallel tranzaksiyalar bir-biriga xalaqit bermaydi
+  D - Durability  -> COMMIT dan keyin ma'lumot yo'qolmaydi (disk)
+
+--- ROLLBACK va SAVEPOINT ---
+  BEGIN;
+    UPDATE posts SET views = 999;         -- oops, WHERE yo'q!
+    SELECT views FROM posts;              -- hammasi 999 -> xato ko'rdik
+  ROLLBACK;                               -- BEKOR, hech nima o'zgarmadi
+
+  SAVEPOINT (qisman qaytarish):
+  BEGIN;
+    UPDATE posts SET views = views + 10;
+    SAVEPOINT sp1;
+    DELETE FROM posts;                    -- oops
+    ROLLBACK TO sp1;                      -- faqat DELETE bekor, UPDATE qoladi
+  COMMIT;
+
+--- TRANZAKSIYA ICHIDA XATO BO'LSA ---
+  BEGIN ichida biror komanda xato bersa, PostgreSQL butun tranzaksiyani
+  "abort" holatiga o'tkazadi:
+    ERROR: current transaction is aborted, commands ignored until end
+           of transaction block
+  Yechim: ROLLBACK; (yoki SAVEPOINT bilan oldini olish).
+
+--- DDL TRANZAKSIYADA (PostgreSQL ning kuchli tomoni) ---
+  Bu faylda CREATE INDEX ham BEGIN...COMMIT ichida. PostgreSQL da
+  CREATE TABLE, CREATE INDEX, ALTER TABLE kabi DDL komandalar ham
+  tranzaksiyaga kiradi va ROLLBACK qilinadi! (Ko'p boshqa bazalarda yo'q.)
+  Ya'ni migratsiyani xavfsiz "hammasi yoki hech nima" qilib bajarish mumkin.
+
+  ISTISNO: CREATE INDEX CONCURRENTLY tranzaksiya ichida ishlamaydi
+  (u jadvalni bloklamasdan index quradi, lekin BEGIN/COMMIT dan tashqarida).
+
+--- IZOLYATSIYA DARAJALARI (qisqacha, keyingi partlar uchun) ---
+  READ COMMITTED (default) -> har komanda commit qilingan ma'lumotni ko'radi
+  REPEATABLE READ          -> tranzaksiya davomida "surat" o'zgarmaydi
+  SERIALIZABLE             -> eng qat'iy, go'yo ketma-ket bajarilgandek
+    BEGIN ISOLATION LEVEL SERIALIZABLE;
+
+
+================================================================================
+14. JOIN TURLARI — TO'LIQ XARITA
+================================================================================
+
+  Ikki jadval: A (chap), B (o'ng).
+
+  INNER JOIN
+      Faqat HAR IKKALASIDA mos keladigan qatorlar (kesishma).
+      A ∩ B
+
+  LEFT JOIN (LEFT OUTER)
+      A ning HAMMASI + B dan mos kelgani. B da yo'q bo'lsa -> NULL.
+      Butun A.
+
+  RIGHT JOIN (RIGHT OUTER)
+      B ning HAMMASI + A dan mos kelgani. Amalda kam (LEFT ga aylantiriladi).
+      Butun B.
+
+  FULL JOIN (FULL OUTER)
+      A va B ning HAMMASI. Mos kelmaganlar ikki tomonda ham NULL.
+      A ∪ B.
+
+  CROSS JOIN
+      HAR bir A qatorini HAR bir B qatoriga juftlaydi (dekart ko'paytma).
+      ON sharti yo'q. A × B (masalan 3 × 2 = 6 qator).
+      01-fayldagi `FROM posts p, tags t` — bu yashirin CROSS JOIN.
+
+  SELF JOIN
+      Jadvalni O'ZIGA join qilish (alias bilan). Iyerarxiya uchun:
+        FROM employees e JOIN employees m ON e.manager_id = m.id
+
+--- ANTI-JOIN va SEMI-JOIN patternlari ---
+  ANTI-JOIN ("mos kelmaganlar"):
+    A LEFT JOIN B ON ... WHERE B.id IS NULL
+    -- yoki: WHERE NOT EXISTS (SELECT 1 FROM B WHERE ...)
+
+  SEMI-JOIN ("mos kelgani bor, lekin B ustunlari kerak emas"):
+    WHERE EXISTS (SELECT 1 FROM B WHERE ...)
+    -- yoki: WHERE A.x IN (SELECT x FROM B)
+
+--- QAYSI JOIN NI TANLASH? ---
+  "Faqat ikkalasida ham bor bo'lganlar"          -> INNER
+  "Chapdagi hammasi, o'ngda bo'lsa qo'sh"        -> LEFT
+  "Bog'liqligi yo'qlarni topish"                  -> LEFT + IS NULL
+  "Ikki tomonning ham hammasi"                    -> FULL
+  "Har kombinatsiya"                              -> CROSS
+
+
+================================================================================
+15. SQL BAJARILISH TARTIBI (GROUP BY / HAVING KONTEKSTI)
+================================================================================
+
+YOZILISH tartibi:
+  SELECT -> FROM -> JOIN -> WHERE -> GROUP BY -> HAVING -> ORDER BY -> LIMIT
+
+BAJARILISH (mantiqiy) tartibi:
+  1. FROM + JOIN   -> jadvallarni birlashtirish
+  2. WHERE         -> alohida qatorlarni filtrlash (agregatDAN OLDIN)
+  3. GROUP BY      -> guruhlash
+  4. HAVING        -> guruhlarni filtrlash (agregatDAN KEYIN)
+  5. SELECT        -> ustun/agregat hisoblash, ALIAS shu yerda tug'iladi
+  6. DISTINCT      -> takrorlanishni olib tashlash
+  7. ORDER BY      -> saralash
+  8. LIMIT/OFFSET  -> qatorlar sonini cheklash
+
+--- BU PART3  da NIMANI TUSHUNTIRADI? ---
+
+  1. NEGA WHERE da AGREGAT ISHLAMAYDI, HAVING da ISHLAYDI?
+     WHERE (2) guruhlashdan (3) OLDIN -> agregat hali yo'q.
+     HAVING (4) guruhlashdan KEYIN -> agregat mavjud.
+       WHERE COUNT(*) > 1     -- XATO
+       HAVING COUNT(*) > 1    -- TO'G'RI
+
+  2. NEGA subquery kerak bo'ldi (11-fayl)?
+       WHERE views > AVG(views)  -- XATO, WHERE da agregat yo'q
+     Subquery agregatni ALOHIDA hisoblab, WHERE ga tayyor qiymat beradi.
+
+  3. NEGA SELECT dagi ustun GROUP BY da bo'lishi kerak?
+     GROUP BY (3) SELECT (5) dan OLDIN. SELECT guruhlangan ma'lumotni
+     ko'radi -> har ustun yo guruhlash kaliti, yo agregat bo'lishi shart.
+
+  4. NEGA ORDER BY da ALIAS va AGREGAT ISHLAYDI?
+     ORDER BY (7) SELECT (5) dan KEYIN -> alias va agregat tayyor.
+       ORDER BY total_posts DESC    -- alias ishlaydi (10-fayl)
+       ORDER BY COUNT(*) DESC       -- agregat ham ishlaydi
+
+  5. NEGA WHERE da alias ishlamaydi?
+     WHERE (2) SELECT (5) dan OLDIN -> alias hali yaratilmagan.
+
+
+================================================================================
+16. QO'SHIMCHA BILISHI KERAK BO'LGAN NARSALAR
+================================================================================
+
+--- 16.1 STRING_AGG / ARRAY_AGG — qatorlarni birlashtirish ---
+  Bir postning barcha taglarini bitta ustunda:
+    SELECT p.title, STRING_AGG(t.name, ', ' ORDER BY t.name) AS tags
+    FROM posts p
+    LEFT JOIN post_tags pt ON p.id = pt.post_id
+    LEFT JOIN tags t ON pt.tag_id = t.id
+    GROUP BY p.id, p.title;
+    -- 'sql, backend' kabi
+
+  ARRAY_AGG -> massiv qaytaradi: {sql, backend}
+  JSON_AGG / JSONB_AGG -> JSON massiv (API javoblari uchun juda qulay)
+
+--- 16.2 WINDOW FUNCTIONS (oyna funksiyalari) — keyingi partlar ---
+  GROUP BY qatorlarni YIG'ADI (kamaytiradi). Window funksiya esa har
+  qatorni SAQLAB, yoniga agregat qo'shadi:
+
+    SELECT title, views,
+           RANK() OVER (ORDER BY views DESC)          AS reyting,
+           AVG(views) OVER ()                         AS umumiy_ortacha,
+           SUM(views) OVER (PARTITION BY status)      AS status_bo_yicha
+    FROM posts;
+
+  ROW_NUMBER(), RANK(), DENSE_RANK(), LAG(), LEAD() — juda kuchli vositalar.
+
+--- 16.3 UPSERT (ON CONFLICT) — takrorlash ---
+  INSERT INTO tags (name) VALUES ('sql')
+  ON CONFLICT (name) DO NOTHING;
+  -- 'sql' allaqachon bor bo'lsa xato bermaydi (name UNIQUE)
+
+  INSERT INTO tags (name) VALUES ('sql')
+  ON CONFLICT (name) DO UPDATE SET name = EXCLUDED.name
+  RETURNING id;
+
+--- 16.4 UPDATE / DELETE bilan JOIN ---
+  -- Boshqa jadvalga tayanib UPDATE:
+  UPDATE posts SET status = 'published'
+  FROM users
+  WHERE posts.user_id = users.id AND users.name = 'Jasurbek';
+
+  -- Boshqa jadvalga tayanib DELETE:
+  DELETE FROM comments
+  USING posts
+  WHERE comments.post_id = posts.id AND posts.status = 'draft';
+
+--- 16.5 COALESCE agregatlar bilan ---
+  Bo'sh guruhda SUM NULL qaytaradi. 0 kerak bo'lsa:
+    SELECT u.name, COALESCE(SUM(p.views), 0) AS total
+    FROM users u LEFT JOIN posts p ON u.id = p.user_id
+    GROUP BY u.id, u.name;
+
+--- 16.6 NORMALIZATSIYA (qisqacha nazariya) ---
+  1NF -> har katak bitta qiymat (massiv/ro'yxat yo'q)
+  2NF -> har ustun butun primary key ga bog'liq
+  3NF -> ustunlar bir-biriga emas, faqat key ga bog'liq
+  Part3 dagi sxema aslida shu qoidalarga amal qiladi: takrorlanish yo'q,
+  har fakt bir joyda saqlanadi.
+
+--- 16.7 EXPLAIN ANALYZE ni o'qish ---
+  EXPLAIN ANALYZE SELECT ... ;
+    Seq Scan          -> butun jadval (kichik jadvalda normal)
+    Index Scan        -> index ishladi
+    Nested Loop / Hash Join / Merge Join -> JOIN algoritmi
+    actual time=...   -> real vaqt (ms)
+    rows=...          -> qayta ishlangan qatorlar
+
+--- 16.8 psql — bog'liqliklarni ko'rish ---
+  \d posts        -> ustunlar, PK, FK, indexlar, constraintlar
+  \d+ posts       -> to'liqroq (hajm, izohlar)
+  \di             -> barcha indexlar
+  \dt             -> barcha jadvallar
+
+
+================================================================================
+17. TEZ-TEZ UCHRAYDIGAN XATOLAR VA TUZOQLAR
+================================================================================
+
+  "insert or update on table ... violates foreign key constraint"
+      -> user_id/post_id qiymati "ota" jadvalda mavjud emas. Avval ota
+         yozuvni yarat, keyin bola.
+
+  "update or delete on table "users" violates foreign key constraint ..."
+      -> Postlari bor userni o'chirmoqchisiz. Avval postlarni o'chiring,
+         yoki FK ni ON DELETE CASCADE qiling.
+
+  "cannot drop table users because other objects depend on it"
+      -> DROP tartibini bola->ota qiling, yoki DROP ... CASCADE.
+
+  "column "p.title" must appear in the GROUP BY clause or be used in
+   an aggregate function"
+      -> SELECT dagi agregatsiz ustunni GROUP BY ga qo'shing.
+
+  "aggregate functions are not allowed in WHERE"
+      -> Agregat filtri HAVING ga o'tkazing, yoki subquery ishlating.
+
+  "column reference "id" is ambiguous"
+      -> Ikki jadvalda `id` bor. Alias bilan aniqlashtiring: p.id / u.id.
+
+  LEFT JOIN dan keyin COUNT(*) postsizga 1 beryapti
+      -> COUNT(*) o'rniga COUNT(o'ng_jadval.id) ishlating (9-bo'lim).
+
+  LEFT JOIN INNER JOIN dek ishlayapti (NULL qatorlar yo'qolyapti)
+      -> O'ng jadval sharti WHERE da. Uni ON ga o'tkazing (5-bo'lim).
+
+  N:M da COUNT juda katta chiqyapti
+      -> COUNT(DISTINCT x.id) ishlating (10-bo'lim).
+
+  "current transaction is aborted, commands ignored ..."
+      -> BEGIN ichida xato bo'ldi. ROLLBACK; yozing.
+
+  Index yaratdim, lekin EXPLAIN hali Seq Scan
+      -> Jadval juda kichik. PostgreSQL ataylab indexni ishlatmaydi.
+         Katta jadvalda test qiling, yoki tartib/ustunni tekshiring.
+
+  SELECT ... FROM a, b   (WHERE siz)
+      -> Bu CROSS JOIN — dekart ko'paytma, kutilmagan ko'p qator. ON/WHERE
+         sharti qo'yishni unutmang.
+
+  `SELECT title, views status FROM ...` (12-faylda)
+      -> Vergul tushib qolgan: `views status` = views ustuniga status
+         nomi (alias). Aslida `title, views, status` bo'lishi kerak.
+
+
+================================================================================
+18. CHEAT SHEET
+================================================================================
+
+--- ALOQA TURLARI ---
+  1:N  -> FK "ko'p" tomonda           [posts.user_id -> users.id]
+  N:M  -> bog'lovchi jadval + 2 FK    [post_tags(post_id, tag_id)]
+  composite PK  -> PRIMARY KEY(a, b)  -> juftlik unikal
+
+--- FOREIGN KEY ---
+  col UUID REFERENCES parent(id)
+  ON DELETE RESTRICT | CASCADE | SET NULL
+  FK ustuniga INDEX qo'shing! (avtomatik yaratilmaydi)
+
+--- JOIN ---
+  INNER JOIN  -> ikkalasida ham bor (kesishma)
+  LEFT JOIN   -> chapning hammasi, o'ngda yo'q -> NULL
+  LEFT + WHERE o'ng.col IS NULL -> "bog'liqligi yo'qlar" (anti-join)
+  N:M -> ikki INNER JOIN (posts -> post_tags -> tags)
+  Alias: FROM posts p JOIN users u ON p.user_id = u.id
+
+  LEFT JOIN da o'ng jadval shartini ON ga qo'y (WHERE ga emas!)
+
+--- AGREGATLAR ---
+  COUNT(*)  COUNT(col)  COUNT(DISTINCT col)  SUM  AVG  MIN  MAX
+  COUNT(*) FILTER (WHERE ...)   -- shartli sanash
+  LEFT JOIN dan keyin -> COUNT(o'ng.id), COUNT(*) EMAS
+  N:M dan keyin -> COUNT(DISTINCT x.id)
+  Bo'sh natijada SUM -> NULL (COALESCE(SUM(x),0))
+
+--- GROUP BY / HAVING ---
+  SELECT dagi har ustun: yo GROUP BY da, yo agregat ichida
+  WHERE  -> guruhlashdan OLDIN (qatorlar)
+  HAVING -> guruhlashdan KEYIN (guruhlar, agregat)
+
+--- SUBQUERY ---
+  WHERE x > (SELECT AVG(x) FROM t)         -- skalyar
+  WHERE id IN (SELECT ... )                -- ro'yxat
+  WHERE EXISTS (SELECT 1 FROM ... )        -- mavjudlik
+  WHERE NOT EXISTS (...)                   -- yo'qlik
+
+--- INDEX ---
+  CREATE INDEX IF NOT EXISTS idx ON t(col);
+  CREATE INDEX idx ON t(a, b DESC);        -- kompozit, left-prefix qoidasi
+  EXPLAIN ANALYZE ...                      -- Seq Scan vs Index Scan
+  Kichik jadvalda index ishlatilmaydi (normal)
+
+--- TRANZAKSIYA ---
+  BEGIN; ... COMMIT;                       -- saqlash
+  BEGIN; ... ROLLBACK;                     -- bekor qilish
+  SAVEPOINT sp; ... ROLLBACK TO sp;
+  ACID: Atomicity, Consistency, Isolation, Durability
+  DDL (CREATE/ALTER) ham tranzaksiyada ROLLBACK qilinadi (PostgreSQL)
+
+--- BAJARILISH TARTIBI ---
+  FROM/JOIN -> WHERE -> GROUP BY -> HAVING -> SELECT -> DISTINCT -> ORDER BY -> LIMIT
+  (WHERE: agregat YO'Q, alias YO'Q | HAVING: agregat BOR | ORDER BY: alias+agregat BOR)
+
+--- PSQL ---
+  \d table   \di   \dt   \x auto   \timing   \i fayl.sql   \conninfo   \q
+
+
+================================================================================
+PART3 FAYLLARI RO'YXATI
+================================================================================
+  01_reset_and_seed_relationship.sql   — 5 jadval, FK, seed (INSERT...SELECT)
+  02_foreign_keys.sql                  — FK qiymatlarini ko'rish
+  03_one_to_many_relationshiip.sql     — 1:N, INNER JOIN (users->posts)
+  04_inner_join.sql                    — INNER JOIN + WHERE + ORDER BY
+  05_left_join.sql                     — LEFT JOIN, NULL (izohsiz post)
+  06_many_to_many_relationship.sql     — N:M, ikki JOIN (posts<->tags)
+  07_table_aliases.sql                 — alias + INNER va LEFT aralash
+  08_aggregate_functions.sql           — COUNT/SUM/AVG/MIN/MAX + FILTER
+  09_group_by.sql                      — GROUP BY + HAVING + LEFT JOIN COUNT
+  10_count_distinct.sql                — COUNT(DISTINCT) + N:M
+  11_sub_queries.sql                   — subquery (views > AVG)
+  12_indexes.sql                       — CREATE INDEX (bitta va kompozit)
+  13_transactions.sql                  — BEGIN/COMMIT, ko'p qadamli o'zgarish
+
+================================================================================
+                              PART3 TUGADI
+   Keyingi qadam (part4?): window funksiyalar (OVER, RANK, ROW_NUMBER),
+   CTE (WITH) chuqurroq, FULL/CROSS/SELF JOIN, VIEW va MATERIALIZED VIEW,
+   izolyatsiya darajalari va lock, EXPLAIN chuqur tahlili, JSONB agregatlar,
+   trigger va funksiyalar (PL/pgSQL).
+================================================================================
