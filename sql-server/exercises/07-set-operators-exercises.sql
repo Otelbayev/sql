@@ -1,35 +1,35 @@
 -- ============================================
--- Mavzu: Set Operators (UNION, UNION ALL, EXCEPT, INTERSECT)
+-- Mavzu: Set Operators
 -- Jadvallar: Sales.Customers (CustomerID, FirstName, LastName),
 --            Sales.Employees (EmployeeID, FirstName, LastName),
 --            Sales.Orders, Sales.OrdersArchive (bir xil ustunlar)
 -- ============================================
 
--- 1) UNION yordamida Sales.Customers va Sales.Employees'dagi ID, FirstName, LastName
---    ma'lumotlarini takrorlarsiz birlashtiring.
+-- 1) Sales.Customers va Sales.Employees'dagi ID, FirstName, LastName ma'lumotlarini
+--    bitta ro'yxatga, takrorlanuvchi qatorlarsiz birlashtiring.
 -- Yozing:
 
 
--- 2) UNION ALL yordamida xuddi shu ustunlarni, lekin takrorlarni saqlagan holda birlashtiring.
+-- 2) Xuddi shu ustunlarni, lekin takrorlanuvchi qatorlarni saqlagan holda birlashtiring.
 -- Yozing:
 
 
--- 3) 1- va 2-natijalar orasidagi qatorlar sonini COUNT(*) bilan solishtiring
+-- 3) 1- va 2-natijalar orasidagi qatorlar sonini solishtiring
 --    (ikkita alohida so'rov yozing).
 -- Yozing:
 
 
--- 4) EXCEPT yordamida Sales.Customers'da mavjud, lekin Sales.Employees'da
---    (ID, FirstName, LastName bo'yicha) mavjud bo'lmagan qatorlarni toping.
+-- 4) Sales.Customers'da mavjud, lekin Sales.Employees'da (ID, FirstName, LastName
+--    bo'yicha) mavjud bo'lmagan qatorlarni toping.
 -- Yozing:
 
 
--- 5) INTERSECT yordamida ikkala jadvalda ham (ID, FirstName, LastName bo'yicha)
---    bir xil bo'lgan qatorlarni toping.
+-- 5) Ikkala jadvalda ham (ID, FirstName, LastName bo'yicha) bir xil bo'lgan
+--    qatorlarni toping.
 -- Yozing:
 
 
--- 6) Sales.Orders va Sales.OrdersArchive jadvallarini UNION bilan birlashtiring va
+-- 6) Sales.Orders va Sales.OrdersArchive jadvallarini bitta natijaga birlashtiring va
 --    har bir qatorga qaysi jadvaldan kelganini bildiruvchi qo'shimcha ustun qo'shing
 --    ('current' yoki 'archive' literal qiymat sifatida). Natijani OrderID bo'yicha saralang.
 -- Yozing:
