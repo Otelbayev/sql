@@ -104,3 +104,47 @@ FROM   (SELECT *,
                MAX(Salary) OVER () AS HighestSalary
         FROM   Sales.Employees) AS t
 WHERE  Salary = HighestSalary;
+
+SELECT Sales,
+       SUM(Sales) OVER ()
+FROM   Sales.Orders;
+
+SELECT OrderID,
+       ProductID,
+       OrderDate,
+       Sales,
+       AVG(Sales) OVER (PARTITION BY ProductID) AS AvgByProduct,
+       AVG(Sales) OVER (PARTITION BY ProductID ORDER BY OrderDate) AS MovingAvg
+FROM   Sales.Orders;
+
+SELECT OrderID,
+       Sales,
+       ROW_NUMBER() OVER (ORDER BY Sales DESC) AS SalesRankRow,
+       RANK() OVER (ORDER BY Sales DESC) AS SalesRank,
+       DENSE_RANK() OVER (ORDER BY Sales DESC) AS DenseRank
+FROM   Sales.Orders;
+
+SELECT OrderID,
+       OrderDate,
+       ProductID,
+       ROW_NUMBER() OVER (PARTITION BY ProductID ORDER BY Sales DESC) AS RankByProduct
+FROM   Sales.Orders;
+
+SELECT   TOP 2 CustomerID,
+               SUM(Sales) AS total_sales
+FROM     Sales.Orders
+GROUP BY CustomerID
+ORDER BY total_sales;
+
+SELECT *
+FROM   (SELECT   CustomerID,
+                 SUM(Sales) AS total_sales,
+                 ROW_NUMBER() OVER (ORDER BY SUM(Sales)) AS RankCustomers
+        FROM     Sales.Orders
+        GROUP BY CustomerID) AS t
+WHERE  RankCustomers <= 2;
+
+SELECT ROW_NUMBER() OVER (ORDER BY OrderID, OrderDate) AS UniqueID,
+       *
+FROM   Sales.OrdersArchive;
+
