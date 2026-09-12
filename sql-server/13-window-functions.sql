@@ -148,3 +148,8 @@ SELECT ROW_NUMBER() OVER (ORDER BY OrderID, OrderDate) AS UniqueID,
        *
 FROM   Sales.OrdersArchive;
 
+
+SELECT OrderID, Sales, NTILE(3) OVER(ORDER BY Sales DESC) as Bucket
+FROM   Sales.Orders 
+
+SELECT * from  Sales.Orders

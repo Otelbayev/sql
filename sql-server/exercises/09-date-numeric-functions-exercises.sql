@@ -1,86 +1,100 @@
 -- ============================================
 -- Mavzu: Date & Numeric Functions
--- Jadvallar: Sales.Orders (OrderID, OrderDate, ShipDate, CreationTime, Sales, Quantity),
---            customers (score)
+-- Baza: SalesDB
+-- Jadvallar: Sales.Orders    (OrderID, ProductID, CustomerID, SalesPersonID, OrderDate,
+--                             ShipDate, OrderStatus, Quantity, Sales, CreationTime)
+--            Sales.Employees (EmployeeID, FirstName, LastName, BirthDate, Salary, ...)
 -- ============================================
--- ---- SANA FUNKSIYALARI ----
--- 1) Har bir buyurtma uchun OrderDate'dan kun, oy va yilni alohida ustunlarda chiqaring.
--- Yozing:
-SELECT OrderDate,
-       DAY(OrderDate),
-       MONTH(OrderDate),
-       YEAR(OrderDate)
-FROM   Sales.Orders;
 
--- 2) Hozirgi sana va vaqtni chiqaring.
--- Yozing:
-SELECT GETDATE();
 
--- 3) Har bir buyurtmaning OrderDate'i qaysi hafta kuniga (masalan "Monday")
---    to'g'ri kelishini chiqaring.
--- Yozing:
-SELECT OrderDate,
-       datename(WEEKDAY, OrderDate)
-FROM   Sales.Orders;
+-- ---- SANA BILAN ISHLASH ----
 
--- 4) Har bir OrderDate yil ichidagi qaysi haftaga to'g'ri kelishini toping.
+-- 1) Hozirgi sana va vaqtni chiqaring.
 -- Yozing:
-SELECT OrderDate,
-       DATEPART(WEEK, OrderDate)
-FROM   Sales.Orders;
 
--- 5) CreationTime qiymatini daqiqagacha, kungacha va oygacha qisqartirib,
---    uchala natijani alohida ustunlarda chiqaring.
--- Yozing:
-SELECT CreationTime,
-       DATETRUNC(day, CreationTime),
-       DATETRUNC(MONTH, CreationTime),
-       DATETRUNC(MINUTE, CreationTime)
-FROM   Sales.Orders;
 
--- 6) Oy nomi bo'yicha guruhlab, har bir oyda nechta buyurtma qilinganini hisoblang.
-SELECT   DATENAME(MONTH, OrderDate),
-         COUNT(ProductID)
-FROM     Sales.Orders
-GROUP BY DATENAME(MONTH, OrderDate);
 
+-- 2) Har bir buyurtma uchun OrderID va OrderDate'ning kuni, oyi, yilini uchta
+--    alohida ustunda chiqaring (ustun nomlari: order_day, order_month, order_year).
 -- Yozing:
--- 7) Faqat may oyida (OrderDate) qilingan buyurtmalarni chiqaring.
--- Yozing:
-SELECT *
-FROM   Sales.Orders
-WHERE  DATEPART(MONTH, OrderDate) = 5;
 
--- 8) Har bir buyurtma uchun ShipDate va OrderDate orasidagi kunlar farqini hisoblang.
--- Yozing:
-SELECT ShipDate,
-       OrderDate,
-       DATEDIFF(DAY, OrderDate, ShipDate)
-FROM   Sales.Orders;
 
--- ---- SONLI (NUMERIC) FUNKSIYALAR ----
--- 9) customers jadvalidagi score qiymatlarini eng yaqin o'nlikgacha yaxlitlab chiqaring.
--- Yozing:
-SELECT Score,
-       ROUND(Score, -1)
-FROM   Sales.Customers;
 
--- 10) Sales.Orders jadvalidagi Sales ustunini yuqoriga va pastga yaxlitlab,
---     ikkala natijani bir qatorda solishtiring.
+-- 3) Har bir buyurtma uchun OrderDate qaysi hafta kuniga to'g'ri kelishini
+--    to'liq nom bilan chiqaring (masalan 'Monday', ustun nomi: weekday_name).
 -- Yozing:
-SELECT CEILING(Sales),
-       FLOOR(Sales)
-FROM   Sales.Orders;
 
--- 11) Har bir buyurtma uchun Sales / Quantity nisbatini hisoblang va natija
---     har doim musbat bo'lishini ta'minlang.
--- Yozing:
-SELECT ABS(Sales / Quantity)
-FROM   Sales.Orders
-WHERE  Quantity != 0;
 
--- 12) Har bir buyurtma uchun Sales qiymatini kvadratga (2-darajaga) oshiring.
+
+-- 4) Har bir buyurtma uchun OrderDate yilning nechanchi haftasiga tushishini
+--    chiqaring (ustun nomi: week_number).
 -- Yozing:
-SELECT POWER(Sales, 2),
-       Sales
-FROM   Sales.Orders;
+
+
+
+-- 5) Har bir buyurtma uchun CreationTime qiymatini uch xil aniqlikda qisqartirib
+--    chiqaring: daqiqagacha, kungacha va oygacha (uchta alohida ustun).
+-- Yozing:
+
+
+
+-- 6) Har bir buyurtma uchun CreationTime'ni 'dd-MM-yyyy' ko'rinishida va
+--    'yyyy-MM-dd HH:mm:ss' ko'rinishida chiqaring (ustun nomlari: europe_style,
+--    international_style).
+-- Yozing:
+
+
+
+-- 7) Oy nomi bo'yicha guruhlab, har bir oyda nechta buyurtma qilinganini chiqaring
+--    (ustun nomlari: order_month, total_orders).
+-- Yozing:
+
+
+
+-- 8) Faqat 2025-yil fevral oyida qilingan buyurtmalarni chiqaring.
+-- Yozing:
+
+
+
+-- 9) Har bir buyurtma uchun OrderDate va ShipDate orasida necha kun o'tganini
+--    hisoblang (ustun nomi: shipping_days).
+-- Yozing:
+
+
+
+-- 10) Har bir xodim uchun ismini, BirthDate'ini va bugungi kunga necha yoshda
+--     ekanini chiqaring (ustun nomi: age).
+-- Yozing:
+
+
+
+-- 11) Har bir buyurtma uchun OrderDate'ga 30 kun qo'shilgan sanani va OrderDate'dan
+--     3 oy oldingi sanani chiqaring (ustun nomlari: plus_30_days, minus_3_months).
+-- Yozing:
+
+
+
+-- 12) '2025-07-15' matnini haqiqiy sana turiga, 12345 sonini esa matn turiga
+--     aylantirib chiqaring (ustun nomlari: as_date, as_text).
+-- Yozing:
+
+
+
+-- ---- SONLAR BILAN ISHLASH ----
+
+-- 13) Har bir buyurtma uchun Sales'ni Quantity'ga bo'lgan natijani 2 xonagacha
+--     aniqlikda chiqaring (ustun nomi: unit_price). Quantity 0 bo'lgan qatorda
+--     so'rov xatolik bermasligi kerak.
+-- Yozing:
+
+
+
+-- 14) Har bir buyurtma uchun Sales qiymatini yuqoriga va pastga butunlashtirib,
+--     ikkala natijani bitta qatorda yonma-yon chiqaring.
+-- Yozing:
+
+
+
+-- 15) Har bir buyurtma uchun Sales qiymatining kvadratini hisoblang
+--     (ustun nomi: sales_squared).
+-- Yozing:

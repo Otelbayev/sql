@@ -1,115 +1,81 @@
 -- ============================================
 -- Mavzu: Set Operators
--- Jadvallar: Sales.Customers (CustomerID, FirstName, LastName),
---            Sales.Employees (EmployeeID, FirstName, LastName),
---            Sales.Orders, Sales.OrdersArchive (bir xil ustunlar)
+-- Baza: SalesDB
+-- Jadvallar: Sales.Customers    (CustomerID, FirstName, LastName, Country, Score)
+--            Sales.Employees    (EmployeeID, FirstName, LastName, Department,
+--                                BirthDate, Gender, Salary, ManagerID)
+--            Sales.Orders       (OrderID, ProductID, CustomerID, SalesPersonID, OrderDate,
+--                                ShipDate, OrderStatus, ShipAddress, BillAddress,
+--                                Quantity, Sales, CreationTime)
+--            Sales.OrdersArchive (Sales.Orders bilan bir xil ustunlar)
 -- ============================================
-SELECT *
-FROM   Sales.Customers;
 
-SELECT *
-FROM   Sales.Employees;
 
--- 1) Sales.Customers va Sales.Employees'dagi ID, FirstName, LastName ma'lumotlarini
---    bitta ro'yxatga, takrorlanuvchi qatorlarsiz birlashtiring.
+-- 1) Sales.Customers va Sales.Employees dagi odamlarni bitta ro'yxatga yig'ing:
+--    ustunlar ID (mijozda CustomerID, xodimda EmployeeID), FirstName, LastName bo'lsin.
+--    Ikkala jadvalda ham bir xil takrorlangan qatorlar natijada bir marta ko'rinsin.
 -- Yozing:
-SELECT CustomerID,
-       FirstName,
-       LastName
-FROM   Sales.Customers
-UNION
-SELECT EmployeeID,
-       FirstName,
-       LastName
-FROM   Sales.Employees;
 
--- 2) Xuddi shu ustunlarni, lekin takrorlanuvchi qatorlarni saqlagan holda birlashtiring.
+
+
+-- 2) Xuddi shu ro'yxatni yana chiqaring, lekin bu safar takrorlangan qatorlar
+--    o'chirilmasin — hamma qator o'z holicha qolsin.
 -- Yozing:
-SELECT CustomerID,
-       FirstName,
-       LastName
-FROM   Sales.Customers
-UNION ALL
-SELECT EmployeeID,
-       FirstName,
-       LastName
-FROM   Sales.Employees;
 
--- 3) 1- va 2-natijalar orasidagi qatorlar sonini solishtiring
---    (ikkita alohida so'rov yozing).
+
+
+-- 3) 1- va 2-mashq natijalaridagi qatorlar sonini hisoblang (ikkita alohida so'rov yozing)
+--    va sonlar farq qilgan-qilmaganini ko'ring.
 -- Yozing:
--- 3-mashq (1-qism): UNION natijasida nechta qator chiqqanini hisoblash
-SELECT COUNT(*) AS total_rows
-FROM   (SELECT CustomerID,
-               FirstName,
-               LastName
-        FROM   Sales.Customers
-        UNION
-        SELECT EmployeeID,
-               FirstName,
-               LastName
-        FROM   Sales.Employees) AS subquery_union;
 
--- 3-mashq (2-qism): UNION ALL natijasida nechta qator chiqqanini hisoblash
-SELECT COUNT(*) AS total_rows
-FROM   (SELECT CustomerID,
-               FirstName,
-               LastName
-        FROM   Sales.Customers
-        UNION ALL
-        SELECT EmployeeID,
-               FirstName,
-               LastName
-        FROM   Sales.Employees) AS subquery_union_all;
 
--- 4) Sales.Customers'da mavjud, lekin Sales.Employees'da (ID, FirstName, LastName
---    bo'yicha) mavjud bo'lmagan qatorlarni toping.
+
+-- 4) Faqat mijozlar ro'yxatida bor, lekin xodimlar ro'yxatida uchramaydigan
+--    (ID, FirstName, LastName uchligi bo'yicha) odamlarni chiqaring.
 -- Yozing:
-SELECT CustomerID,
-       FirstName,
-       LastName
-FROM   Sales.Customers
-EXCEPT
-SELECT EmployeeID,
-       FirstName,
-       LastName
-FROM   Sales.Employees;
 
--- 5) Ikkala jadvalda ham (ID, FirstName, LastName bo'yicha) bir xil bo'lgan
---    qatorlarni toping.
--- Yozing:
-SELECT CustomerID,
-       FirstName,
-       LastName
-FROM   Sales.Customers
-INTERSECT
-SELECT EmployeeID,
-       FirstName,
-       LastName
-FROM   Sales.Employees;
 
--- 6) Sales.Orders va Sales.OrdersArchive jadvallarini bitta natijaga birlashtiring va
---    har bir qatorga qaysi jadvaldan kelganini bildiruvchi qo'shimcha ustun qo'shing
---    ('current' yoki 'archive' literal qiymat sifatida). Natijani OrderID bo'yicha saralang.
--- Yozing:
-SELECT   OrderID,
-         'current' AS which_table
-FROM     Sales.Orders
-UNION ALL
-SELECT   OrderID,
-         'archive' AS which_table
-FROM     Sales.OrdersArchive
-ORDER BY OrderID;
 
--- 7) 6-mashqdagi natijadan faqat Quantity qiymati 1 dan katta bo'lgan qatorlarni chiqaring.
+-- 5) Endi teskarisini toping: faqat xodimlar ro'yxatida bor, lekin mijozlar
+--    ro'yxatida yo'q odamlarni chiqaring.
 -- Yozing:
-SELECT   OrderID,
-         'current' AS SourceTable
-FROM     Sales.Orders
-WHERE    Quantity > 1
-UNION ALL
-SELECT   OrderID,
-         'archive' AS SourceTable
-FROM     Sales.OrdersArchive
-WHERE    Quantity > 1
-ORDER BY OrderID;
+
+
+
+-- 6) Ikkala ro'yxatda ham bir xil (ID, FirstName, LastName) bilan uchraydigan
+--    odamlarni chiqaring.
+-- Yozing:
+
+
+
+-- 7) Sales.Orders va Sales.OrdersArchive jadvallaridagi barcha buyurtmalarni bitta
+--    ro'yxatga yig'ing. Har bir qatorda qo'shimcha ustun bo'lsin (ustun nomi: SourceTable):
+--    joriy jadvaldan kelgan qatorlarda 'current', arxivdan kelganlarda 'archive' yozilsin.
+--    Natija OrderID bo'yicha saralansin.
+-- Yozing:
+
+
+
+-- 8) 7-mashqdagi umumiy ro'yxatdan faqat Quantity qiymati 1 dan katta bo'lgan
+--    qatorlarni chiqaring.
+-- Yozing:
+
+
+
+-- 9) Arxivda bor, lekin joriy Sales.Orders jadvalida yo'q bo'lgan OrderID'larni toping.
+-- Yozing:
+
+
+
+-- 10) Mijozlar jadvalidagi davlatlar ro'yxatini va qo'lda yozilgan 'Germany',
+--     'USA', 'France' qiymatlarini bitta ustunga takrorlarsiz birlashtiring
+--     (ustun nomi: Country).
+-- Yozing:
+
+
+
+-- 11) Buyurtma bergan mijozlarning CustomerID'lari bilan umuman buyurtma bermagan
+--     mijozlarning CustomerID'larini ikkita alohida ro'yxat sifatida oling, so'ng
+--     ularni bitta natijaga yig'ing: har bir qatorda CustomerID va holatini
+--     bildiruvchi ustun ('has orders' / 'no orders', ustun nomi: OrderState) bo'lsin.
+-- Yozing:

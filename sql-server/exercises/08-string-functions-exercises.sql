@@ -1,58 +1,79 @@
 -- ============================================
 -- Mavzu: String Functions
+-- Baza: MyDatabase
 -- Jadval: customers (id, first_name, country, score)
+-- Eslatma: ba'zi ismlarda boshida yoki oxirida ortiqcha bo'sh joy bor.
 -- ============================================
--- 1) first_name va country'ni '_' belgisi bilan birlashtirib yangi ustun sifatida chiqaring.
--- Yozing:
-SELECT first_name,
-       country,
-       CONCAT(first_name, '-', country)
-FROM   customers;
 
--- 2) first_name ustunini katta harflarga o'girib chiqaring.
--- Yozing:
-SELECT UPPER(first_name)
-FROM   customers;
 
--- 3) country ustunini kichik harflarga o'girib chiqaring.
+-- 1) Har bir mijoz uchun first_name va country'ni bitta ustunga qo'shib chiqaring,
+--    orasida '-' belgisi tursin (ustun nomi: name_country).
 -- Yozing:
-SELECT LOWER(country)
-FROM   customers;
 
--- 4) first_name boshida yoki oxirida ortiqcha bo'sh joy (space) bo'lgan mijozlarni toping.
--- Yozing:
-SELECT *
-FROM   customers
-WHERE  TRIM(first_name) != first_name;
 
--- 5) '2024/08/24' matnidagi barcha '/' belgilarini '-' ga almashtiring.
--- Yozing:
-SELECT '2024/08/24',
-       REPLACE('2024/08/24', '/', '-');
 
--- 6) Har bir mijoz uchun first_name'ning uzunligini hisoblab chiqaring.
+-- 2) first_name ustunini butunlay katta harflarda chiqaring (ustun nomi: upper_name).
 -- Yozing:
-SELECT len(first_name),
-       first_name
-FROM   customers;
 
--- 7) Har bir mijoz uchun first_name'ning (bo'sh joylari olib tashlangan) birinchi 2 ta va
---    oxirgi 2 ta harfini alohida ustunlarda chiqaring.
--- Yozing:
-SELECT first_name,
-       LEFT(TRIM(first_name), 2),
-       RIGHT(TRIM(first_name), 2)
-FROM   customers;
 
--- 8) Har bir mijoz uchun first_name'ning (bo'sh joylari olib tashlangan) 2-harfidan
---    boshlab 3 ta harfini ajratib oling.
--- Yozing:
-SELECT first_name,
-       SUBSTRING(TRIM(first_name), 2, 3)
-FROM   customers;
 
--- 9) first_name uzunligi 5 tadan katta bo'lgan mijozlarning ismini katta harflarda chiqaring.
+-- 3) country ustunini butunlay kichik harflarda chiqaring (ustun nomi: lower_name).
 -- Yozing:
-SELECT UPPER(first_name)
-FROM   customers
-WHERE  LEN(first_name) > 5;
+
+
+
+-- 4) first_name'ining boshida yoki oxirida ortiqcha bo'sh joy bor mijozlarni toping.
+-- Yozing:
+
+
+
+-- 5) '16-05-2004' matnini shunday o'zgartiring-ki, barcha '-' belgilari '/' ga
+--    almashsin. Natijada asl matn ham, o'zgargan matn ham ko'rinsin.
+-- Yozing:
+
+
+
+-- 6) Har bir mijoz uchun first_name va uning nechta belgidan iboratligini
+--    chiqaring (ustun nomi: name_length).
+-- Yozing:
+
+
+
+-- 7) Har bir mijoz uchun first_name'ining (ortiqcha bo'sh joylarsiz) birinchi 3 ta
+--    belgisini va oxirgi 3 ta belgisini alohida ustunlarda chiqaring
+--    (ustun nomlari: left_part, right_part).
+-- Yozing:
+
+
+
+-- 8) Har bir mijoz uchun first_name'ining (ortiqcha bo'sh joylarsiz) 2-belgisidan
+--    boshlab 2 ta belgisini ajratib oling (ustun nomi: middle_part).
+-- Yozing:
+
+
+
+-- 9) Har bir mijoz uchun to'liq ismni shunday chiqaring: birinchi harfi katta,
+--    qolgan harflari kichik bo'lsin (masalan 'MARIA' -> 'Maria', ustun nomi: proper_name).
+--    Ismdagi ortiqcha bo'sh joylar hisobga olinmasin.
+-- Yozing:
+
+
+
+-- 10) first_name uzunligi 5 belgidan katta bo'lgan mijozlarning ismini katta
+--     harflarda chiqaring.
+-- Yozing:
+
+
+
+-- 11) Har bir mijoz uchun elektron pochta manzili yasang: ismning kichik harfli
+--     ko'rinishi, keyin '@', keyin davlat nomining kichik harfli ko'rinishi va
+--     '.com' (masalan 'maria@germany.com', ustun nomi: email).
+--     Ismdagi ortiqcha bo'sh joylar natijaga tushmasin.
+-- Yozing:
+
+
+
+-- 12) Har bir mijoz uchun ismining faqat birinchi harfini va ballini chiqaring,
+--     natijani ismning birinchi harfi bo'yicha alifbo tartibida saralang
+--     (ustun nomlari: initial, score).
+-- Yozing:

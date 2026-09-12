@@ -1,68 +1,70 @@
 -- ============================================
--- Mavzu: Data Query (SELECT asoslari)
+-- Mavzu: Data Query
+-- Baza: MyDatabase
 -- Jadval: customers (id, first_name, country, score)
 -- ============================================
--- 1) customers jadvalidagi barcha ustun va qatorlarni chiqaring.
+
+
+-- 1) customers jadvalidagi barcha ustun va barcha qatorlarni chiqaring.
 -- Yozing:
-SELECT *
-FROM   customers;
+
+
 
 -- 2) Faqat first_name va score ustunlarini chiqaring.
 -- Yozing:
-SELECT first_name,
-       score
-FROM   customers;
 
--- 3) score qiymati 400 dan katta bo'lgan mijozlarni chiqaring.
+
+
+-- 3) score qiymati 500 dan katta bo'lgan mijozlarni chiqaring.
 -- Yozing:
-SELECT *
-FROM   customers
-WHERE  score > 400;
 
--- 4) country = 'UK' bo'lgan mijozlarni chiqaring.
+
+
+-- 4) country qiymati 'Germany' bo'lgan mijozlarni chiqaring.
 -- Yozing:
-SELECT *
-FROM   customers
-WHERE  country = 'UK';
 
--- 5) score noldan farqli bo'lgan mijozlarni score bo'yicha o'sish tartibida saralang.
+
+
+-- 5) Barcha mijozlarni score bo'yicha kamayish tartibida chiqaring.
 -- Yozing:
-SELECT   *
-FROM     customers
-WHERE    score != 0
-ORDER BY score ASC;
 
--- 6) Har bir davlat (country) bo'yicha guruhlab, jami score ni chiqaring.
+
+
+-- 6) score qiymati 0 ga teng bo'lmagan mijozlarni chiqaring: avval country bo'yicha
+--    alifbo teskari tartibida, keyin ayni bir davlat ichida score o'sish tartibida saralansin.
 -- Yozing:
-SELECT   country,
-         SUM(score) AS sum_score
-FROM     customers
-GROUP BY country;
 
--- 7) Har bir davlat bo'yicha o'rtacha score'ni hisoblang va faqat o'rtachasi 300 dan katta bo'lgan davlatlarni qoldiring.
+
+
+-- 7) customers jadvalidagi davlatlar ro'yxatini chiqaring, har bir davlat nomi
+--    natijada faqat bir marta ko'rinsin.
 -- Yozing:
-SELECT   country,
-         AVG(score) AS avg_score
-FROM     customers
-GROUP BY country
-HAVING   AVG(score) > 300;
 
--- 8) customers jadvalidagi takrorlanmas davlatlar ro'yxatini chiqaring.
+
+
+-- 8) Har bir davlat uchun bitta qator chiqaring: country va o'sha davlatdagi
+--    mijozlar score'larining yig'indisi (ustun nomi: total_score).
 -- Yozing:
-SELECT DISTINCT country, first_name
-FROM   customers;
 
 
--- 9) Eng yuqori score'ga ega bo'lgan 5 ta mijozni chiqaring.
+
+-- 9) Har bir davlat uchun mijozlar score'larining yig'indisini hisoblang, lekin
+--    natijada faqat yig'indisi 800 dan katta bo'lgan davlatlar qolsin.
 -- Yozing:
-SELECT   TOP 5 *
-FROM     customers
-ORDER BY score DESC;
 
 
--- 10) country = 'USA' bo'lgan mijozlar orasidan score bo'yicha eng past 2 tasini chiqaring.
+
+-- 10) score qiymati 0 ga teng bo'lmagan mijozlar bo'yicha har bir davlatning o'rtacha
+--     score'ini hisoblang (ustun nomi: average_score) va natijada faqat o'rtachasi
+--     450 dan katta bo'lgan davlatlarni qoldiring.
 -- Yozing:
-SELECT   TOP 2 *
-FROM     customers
-WHERE    country = 'USA'
-ORDER BY score ASC;
+
+
+
+-- 11) Eng yuqori score'ga ega 3 ta mijozni chiqaring.
+-- Yozing:
+
+
+
+-- 12) country qiymati 'USA' bo'lgan mijozlar orasidan eng past score'ga ega 2 tasini chiqaring.
+-- Yozing:
