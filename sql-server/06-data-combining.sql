@@ -75,16 +75,11 @@ FROM   customers
        orders
        ON id = customer_id;
 
-
 SELECT *
 FROM   customers;
 
 SELECT *
 FROM   orders;
 
-
 SELECT *
 FROM   customers CROSS JOIN orders;
-
-
-

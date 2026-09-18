@@ -9,11 +9,9 @@ CREATE TABLE persons (
 ALTER TABLE persons
     ADD email VARCHAR (50) NOT NULL;
 
-
-ALTER TABLE persons 
-DROP COLUMN phone;
+ALTER TABLE persons DROP COLUMN phone;
 
 SELECT *
 FROM   persons;
 
-DROP TABLE persons
+DROP TABLE persons;

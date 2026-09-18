@@ -24,5 +24,5 @@ SELECT first_name,
 FROM   customers;
 
 SELECT first_name,
-       SUBSTRING(TRIM(first_name), 2,2) as string
+       SUBSTRING(TRIM(first_name), 2, 2) AS string
 FROM   customers;

@@ -38,33 +38,33 @@ SELECT EmployeeID,
        LastName
 FROM   Sales.Employees;
 
-SELECT 'hi' AS OrderString,
-       [OrderID],
-       [ProductID],
-       [CustomerID],
-       [SalesPersonID],
-       [OrderDate],
-       [ShipDate],
-       [OrderStatus],
-       [ShipAddress],
-       [BillAddress],
-       [Quantity],
-       [Sales],
-       [CreationTime]
-FROM   Sales.Orders
+SELECT   'hi' AS OrderString,
+         [OrderID],
+         [ProductID],
+         [CustomerID],
+         [SalesPersonID],
+         [OrderDate],
+         [ShipDate],
+         [OrderStatus],
+         [ShipAddress],
+         [BillAddress],
+         [Quantity],
+         [Sales],
+         [CreationTime]
+FROM     Sales.Orders
 UNION
-SELECT 'bye',
-[OrderID],
-       [ProductID],
-       [CustomerID],
-       [SalesPersonID],
-       [OrderDate],
-       [ShipDate],
-       [OrderStatus],
-       [ShipAddress],
-       [BillAddress],
-       [Quantity],
-       [Sales],
-       [CreationTime]
-FROM   Sales.OrdersArchive
-ORDER BY OrderID
+SELECT   'bye',
+         [OrderID],
+         [ProductID],
+         [CustomerID],
+         [SalesPersonID],
+         [OrderDate],
+         [ShipDate],
+         [OrderStatus],
+         [ShipAddress],
+         [BillAddress],
+         [Quantity],
+         [Sales],
+         [CreationTime]
+FROM     Sales.OrdersArchive
+ORDER BY OrderID;

@@ -1,454 +1,194 @@
-SELECT
-    OrderID
-    ,
-    OrderDate
-    ,
-    ProductID
-    ,
-    SUM(Sales) AS TotalSales
-FROM
-    Sales.Orders
-GROUP BY
-    ProductID
-    ,
-    OrderID
-    ,
-    OrderDate;
-SELECT
-    OrderID
-    ,
-    OrderDate
-    ,
-    ProductID
-    ,
-    SUM(Sales) OVER
-        (
-            PARTITION BY
-                ProductID
-        )
-    AS TotalSalsByProductID
-FROM
-    Sales.Orders;
-SELECT
-    OrderID
-    ,
-    OrderDate
-    ,
-    ProductID
-    ,
-    Sales
-    ,
-    OrderStatus
-    ,
-    SUM(Sales) OVER () AS TotalSales
-    ,
-    SUM(Sales) OVER
-        (
-            PARTITION BY
-                ProductID
-        )
-    AS TotalSalsByProductID
-    ,
-    SUM(Sales) OVER
-        (
-            PARTITION BY
-                ProductID
-                ,
-                OrderStatus
-        )
-    AS TotalSalsByProductIDandOrderStatus
-FROM
-    Sales.Orders;
-SELECT
-    OrderID
-    ,
-    OrderDate
-    ,
-    Sales
-    ,
-    RANK() OVER
-        (
-            ORDER BY
-                Sales DESC
-        )
-    AS RankSales
-FROM
-    Sales.Orders;
-SELECT
-    OrderID
-    ,
-    OrderDate
-    ,
-    OrderStatus
-    ,
-    Sales
-    ,
-    SUM(Sales) OVER
-        (
-            PARTITION BY
-                OrderStatus
-            ORDER BY
-                OrderDate
-            ROWS BETWEEN
-                CURRENT ROW AND 2 FOLLOWING
-        )
-FROM
-    Sales.Orders;
-SELECT
-    OrderID
-    ,
-    OrderDate
-    ,
-    CustomerID
-    ,
-    COUNT(*) OVER () AS TotalOrders
-    ,
-    COUNT(*) OVER
-        (
-            PARTITION BY
-                CustomerID
-        )
-    AS OrdersByCustomers
-FROM
-    Sales.Orders;
-SELECT
-    CustomerID
-    ,
-    FirstName
-    ,
-    LastName
-    ,
-    Country
-    ,
-    Score
-    ,
-    COUNT(*) OVER ()     AS TotalCustomers
-    ,
-    COUNT(Score) OVER () AS TotaScoreCustomers
-FROM
-    Sales.Customers;
-SELECT
-    OrderID
-    ,
-    COUNT(*) OVER
-        (
-            PARTITION BY
-                OrderID
-        )
-    AS CheckPK
-FROM
-    Sales.OrdersArchive;
-SELECT
-    OrderId
-    ,
-    OrderDate
-    ,
-    Sales
-    ,
-    ProductID
-    ,
-    SUM(Sales) OVER () AS total_sales
-    ,
-    SUM(Sales) OVER
-        (
-            PARTITION BY
-                ProductID
-        )
-    AS each_product_sales
-FROM
-    Sales.Orders;
-SELECT
-    OrderID
-    ,
-    ProductID
-    ,
-    Sales
-    ,
-    SUM(Sales) OVER ()
-    ,
-    ROUND( (CAST(Sales AS FLOAT) / SUM(Sales) OVER ()) * 100, 2 )
-FROM
-    Sales.Orders;
-SELECT
-    OrderID
-    ,
-    OrderDate
-    ,
-    AVG(Sales) OVER () AS AvarageSales
-    ,
-    AVG(Sales) OVER
-        (
-            PARTITION BY
-                ProductID
-        )
-    AS AvarageSalesByProduct
-FROM
-    Sales.Orders;
-SELECT
-    CustomerID
-    ,
-    LastName
-    ,
-    Score
-    ,
-    AVG(Score) OVER ()
-FROM
-    Sales.Customers;
-SELECT
-    *
-FROM
-    (
-        SELECT
-            OrderID
-            ,
-            ProductID
-            ,
-            Sales
-            ,
-            AVG(Sales) OVER () AS AvgSales
-        FROM
-            Sales.Orders ) AS t
-WHERE
-    Sales > AvgSales;
-SELECT
-    OrderID
-    ,
-    OrderDate
-    ,
-    Sales
-    ,
-    ProductID
-    ,
-    MIN(Sales) OVER () AS min_sales
-    ,
-    MAX(Sales) OVER () AS max_sales
-    ,
-    MIN(Sales) OVER
-        (
-            PARTITION BY
-                ProductID
-        )
-    AS min_sales_by_product
-    ,
-    MAX(Sales) OVER
-        (
-            PARTITION BY
-                ProductID
-        )
-    AS max_sales_by_product
-FROM
-    Sales.Orders;
-SELECT
-    *
-FROM
-    (
-        SELECT
-            *
-            ,
-            MAX(Salary) OVER () AS HighestSalary
-        FROM
-            Sales.Employees ) AS t
-WHERE
-    Salary = HighestSalary;
-SELECT
-    Sales
-    ,
-    SUM(Sales) OVER ()
-FROM
-    Sales.Orders;
-SELECT
-    OrderID
-    ,
-    ProductID
-    ,
-    OrderDate
-    ,
-    Sales
-    ,
-    AVG(Sales) OVER
-        (
-            PARTITION BY
-                ProductID
-        )
-    AS AvgByProduct
-    ,
-    AVG(Sales) OVER
-        (
-            PARTITION BY
-                ProductID
-            ORDER BY
-                OrderDate
-        )
-    AS MovingAvg
-FROM
-    Sales.Orders;
-SELECT
-    OrderID
-    ,
-    Sales
-    ,
-    ROW_NUMBER() OVER
-        (
-            ORDER BY
-                Sales DESC
-        )
-    AS SalesRankRow
-    ,
-    RANK() OVER
-        (
-            ORDER BY
-                Sales DESC
-        )
-    AS SalesRank
-    ,
-    DENSE_RANK() OVER
-        (
-            ORDER BY
-                Sales DESC
-        )
-    AS DenseRank
-FROM
-    Sales.Orders;
-SELECT
-    OrderID
-    ,
-    OrderDate
-    ,
-    ProductID
-    ,
-    ROW_NUMBER() OVER
-        (
-            PARTITION BY
-                ProductID
-            ORDER BY
-                Sales DESC
-        )
-    AS RankByProduct
-FROM
-    Sales.Orders;
-SELECT TOP 2 CustomerID
-    ,
-    SUM(Sales) AS total_sales
-FROM
-    Sales.Orders
-GROUP BY
-    CustomerID
-ORDER BY
-    total_sales;
-SELECT
-    *
-FROM
-    (
-        SELECT
-            CustomerID
-            ,
-            SUM(Sales) AS total_sales
-            ,
-            ROW_NUMBER() OVER
-                (
-                    ORDER BY
-                        SUM(Sales)
-                )
-            AS RankCustomers
-        FROM
-            Sales.Orders
-        GROUP BY
-            CustomerID ) AS t
-WHERE
-    RankCustomers <= 2;
-SELECT
-    ROW_NUMBER() OVER
-        (
-            ORDER BY
-                OrderID
-                ,
-                OrderDate
-        )
-    AS UniqueID
-    ,
-    *
-FROM
-    Sales.OrdersArchive;
-SELECT
-    OrderID
-    ,
-    Sales
-    ,
-    NTILE (3) OVER
-        (
-            ORDER BY
-                Sales DESC
-        )
-    AS Bucket
-FROM
-    Sales.Orders;
-SELECT
-    OrderID
-    ,
-    CUME_DIST() OVER
-        (
-            ORDER BY
-                OrderID
-        )
-    as DIST
-FROM
-    Sales.Orders;
-SELECT
-    ProductID
-    ,
-    Price
-    ,
-    CUME_DIST() OVER
-        (
-            ORDER BY
-                Price
-        )
-    dist
-    ,
-    PERCENT_RANK() OVER
-        (
-            ORDER BY
-                Price
-        )
-    percentage
-FROM
-    Sales.Products 
-    
-    -- LEAD LAG
+SELECT   OrderID,
+         OrderDate,
+         ProductID,
+         SUM(Sales) AS TotalSales
+FROM     Sales.Orders
+GROUP BY ProductID, OrderID, OrderDate;
 
+SELECT OrderID,
+       OrderDate,
+       ProductID,
+       SUM(Sales) OVER (PARTITION BY ProductID) AS TotalSalsByProductID
+FROM   Sales.Orders;
 
-SELECT  *,
-        CurrentMonthSales - PrviousMonthSales MoM_Change
-FROM (SELECT
-        DATENAME(MONTH,OrderDate) OrderMonth,
-        SUM(Sales) CurrentMonthSales,
-        LAG(SUM(Sales)) OVER(ORDER BY DATENAME(MONTH, OrderDate)) PrviousMonthSales 
-FROM Sales.Orders 
-GROUP BY DATENAME(MONTH,OrderDate))t
+SELECT OrderID,
+       OrderDate,
+       ProductID,
+       Sales,
+       OrderStatus,
+       SUM(Sales) OVER () AS TotalSales,
+       SUM(Sales) OVER (PARTITION BY ProductID) AS TotalSalsByProductID,
+       SUM(Sales) OVER (PARTITION BY ProductID, OrderStatus) AS TotalSalsByProductIDandOrderStatus
+FROM   Sales.Orders;
 
+SELECT OrderID,
+       OrderDate,
+       Sales,
+       RANK() OVER (ORDER BY Sales DESC) AS RankSales
+FROM   Sales.Orders;
 
-SELECT  CustomerID,
-        AVG(DaysUntilNextOrder) Avg_days
-FROM (
-        SELECT  OrderID,
-                CustomerID,
-                OrderDate CurrentDate,
-                LEAD(OrderDate) OVER(PARTITION BY CustomerID ORDER BY OrderDate) NextOrder,
-                DATEDIFF(DAY, OrderDate,LEAD(OrderDate) OVER(PARTITION BY CustomerID ORDER BY OrderDate)) DaysUntilNextOrder
-        FROM 
-            Sales.Orders
-)t
-GROUP BY
-    CustomerID
+SELECT OrderID,
+       OrderDate,
+       OrderStatus,
+       Sales,
+       SUM(Sales) OVER (PARTITION BY OrderStatus ORDER BY OrderDate ROWS BETWEEN CURRENT ROW AND 2 FOLLOWING)
+FROM   Sales.Orders;
 
-SELECT *, HighestValue1 - LowestValue1 
-FROM
-    (SELECT 
-        OrderID,
-        ProductID,
-        Sales,
-        FIRST_VALUE(Sales) OVER(PARTITION BY ProductID ORDER BY Sales) LowestValue1,
-        MIN(Sales) OVER(PARTITION BY ProductID) LowestValue2,
-        LAST_VALUE(Sales) OVER(PARTITION BY ProductID ORDER BY Sales ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING) HighestValue1,
-        MAX(Sales) OVER(PARTITION BY ProductID) HighestValue2
-    FROM Sales.Orders) t
+SELECT OrderID,
+       OrderDate,
+       CustomerID,
+       COUNT(*) OVER () AS TotalOrders,
+       COUNT(*) OVER (PARTITION BY CustomerID) AS OrdersByCustomers
+FROM   Sales.Orders;
+
+SELECT CustomerID,
+       FirstName,
+       LastName,
+       Country,
+       Score,
+       COUNT(*) OVER () AS TotalCustomers,
+       COUNT(Score) OVER () AS TotaScoreCustomers
+FROM   Sales.Customers;
+
+SELECT OrderID,
+       COUNT(*) OVER (PARTITION BY OrderID) AS CheckPK
+FROM   Sales.OrdersArchive;
+
+SELECT OrderId,
+       OrderDate,
+       Sales,
+       ProductID,
+       SUM(Sales) OVER () AS total_sales,
+       SUM(Sales) OVER (PARTITION BY ProductID) AS each_product_sales
+FROM   Sales.Orders;
+
+SELECT OrderID,
+       ProductID,
+       Sales,
+       SUM(Sales) OVER (),
+       ROUND((CAST (Sales AS FLOAT) / SUM(Sales) OVER ()) * 100, 2)
+FROM   Sales.Orders;
+
+SELECT OrderID,
+       OrderDate,
+       AVG(Sales) OVER () AS AvarageSales,
+       AVG(Sales) OVER (PARTITION BY ProductID) AS AvarageSalesByProduct
+FROM   Sales.Orders;
+
+SELECT CustomerID,
+       LastName,
+       Score,
+       AVG(Score) OVER ()
+FROM   Sales.Customers;
+
+SELECT *
+FROM   (SELECT OrderID,
+               ProductID,
+               Sales,
+               AVG(Sales) OVER () AS AvgSales
+        FROM   Sales.Orders) AS t
+WHERE  Sales > AvgSales;
+
+SELECT OrderID,
+       OrderDate,
+       Sales,
+       ProductID,
+       MIN(Sales) OVER () AS min_sales,
+       MAX(Sales) OVER () AS max_sales,
+       MIN(Sales) OVER (PARTITION BY ProductID) AS min_sales_by_product,
+       MAX(Sales) OVER (PARTITION BY ProductID) AS max_sales_by_product
+FROM   Sales.Orders;
+
+SELECT *
+FROM   (SELECT *,
+               MAX(Salary) OVER () AS HighestSalary
+        FROM   Sales.Employees) AS t
+WHERE  Salary = HighestSalary;
+
+SELECT Sales,
+       SUM(Sales) OVER ()
+FROM   Sales.Orders;
+
+SELECT OrderID,
+       ProductID,
+       OrderDate,
+       Sales,
+       AVG(Sales) OVER (PARTITION BY ProductID) AS AvgByProduct,
+       AVG(Sales) OVER (PARTITION BY ProductID ORDER BY OrderDate) AS MovingAvg
+FROM   Sales.Orders;
+
+SELECT OrderID,
+       Sales,
+       ROW_NUMBER() OVER (ORDER BY Sales DESC) AS SalesRankRow,
+       RANK() OVER (ORDER BY Sales DESC) AS SalesRank,
+       DENSE_RANK() OVER (ORDER BY Sales DESC) AS DenseRank
+FROM   Sales.Orders;
+
+SELECT OrderID,
+       OrderDate,
+       ProductID,
+       ROW_NUMBER() OVER (PARTITION BY ProductID ORDER BY Sales DESC) AS RankByProduct
+FROM   Sales.Orders;
+
+SELECT   TOP 2 CustomerID,
+               SUM(Sales) AS total_sales
+FROM     Sales.Orders
+GROUP BY CustomerID
+ORDER BY total_sales;
+
+SELECT *
+FROM   (SELECT   CustomerID,
+                 SUM(Sales) AS total_sales,
+                 ROW_NUMBER() OVER (ORDER BY SUM(Sales)) AS RankCustomers
+        FROM     Sales.Orders
+        GROUP BY CustomerID) AS t
+WHERE  RankCustomers <= 2;
+
+SELECT ROW_NUMBER() OVER (ORDER BY OrderID, OrderDate) AS UniqueID,
+       *
+FROM   Sales.OrdersArchive;
+
+SELECT OrderID,
+       Sales,
+       NTILE(3) OVER (ORDER BY Sales DESC) AS Bucket
+FROM   Sales.Orders;
+
+SELECT OrderID,
+       CUME_DIST() OVER (ORDER BY OrderID) AS DIST
+FROM   Sales.Orders;
+
+SELECT ProductID,
+       Price,
+       CUME_DIST() OVER (ORDER BY Price) AS dist,
+       PERCENT_RANK() OVER (ORDER BY Price) AS percentage
+FROM   Sales.Products;
+
+-- LEAD LAG
+SELECT *,
+       CurrentMonthSales - PrviousMonthSales AS MoM_Change
+FROM   (SELECT   DATENAME(MONTH, OrderDate) AS OrderMonth,
+                 SUM(Sales) AS CurrentMonthSales,
+                 LAG(SUM(Sales)) OVER (ORDER BY DATENAME(MONTH, OrderDate)) AS PrviousMonthSales
+        FROM     Sales.Orders
+        GROUP BY DATENAME(MONTH, OrderDate)) AS t;
+
+SELECT   CustomerID,
+         AVG(DaysUntilNextOrder) AS Avg_days
+FROM     (SELECT OrderID,
+                 CustomerID,
+                 OrderDate AS CurrentDate,
+                 LEAD(OrderDate) OVER (PARTITION BY CustomerID ORDER BY OrderDate) AS NextOrder,
+                 DATEDIFF(DAY, OrderDate, LEAD(OrderDate) OVER (PARTITION BY CustomerID ORDER BY OrderDate)) AS DaysUntilNextOrder
+          FROM   Sales.Orders) AS t
+GROUP BY CustomerID;
+
+SELECT *,
+       HighestValue1 - LowestValue1
+FROM   (SELECT OrderID,
+               ProductID,
+               Sales,
+               FIRST_VALUE(Sales) OVER (PARTITION BY ProductID ORDER BY Sales) AS LowestValue1,
+               MIN(Sales) OVER (PARTITION BY ProductID) AS LowestValue2,
+               LAST_VALUE(Sales) OVER (PARTITION BY ProductID ORDER BY Sales ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING) AS HighestValue1,
+               MAX(Sales) OVER (PARTITION BY ProductID) AS HighestValue2
+        FROM   Sales.Orders) AS t;
