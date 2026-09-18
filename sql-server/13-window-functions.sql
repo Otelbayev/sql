@@ -412,22 +412,43 @@ SELECT
         )
     percentage
 FROM
-    Sales.Products -- LEAD LAG
-SELECT
-    OrderID
-    ,
-    Sales
-    ,
-    LAG(Sales, 2) OVER
-        (
-            ORDER BY
-                OrderID
-        )
-    ,
-    LEAD(Sales, 2) OVER
-        (
-            order BY
-                OrderID
-        )
-from
-    Sales.Orders;
+    Sales.Products 
+    
+    -- LEAD LAG
+
+
+SELECT  *,
+        CurrentMonthSales - PrviousMonthSales MoM_Change
+FROM (SELECT
+        DATENAME(MONTH,OrderDate) OrderMonth,
+        SUM(Sales) CurrentMonthSales,
+        LAG(SUM(Sales)) OVER(ORDER BY DATENAME(MONTH, OrderDate)) PrviousMonthSales 
+FROM Sales.Orders 
+GROUP BY DATENAME(MONTH,OrderDate))t
+
+
+SELECT  CustomerID,
+        AVG(DaysUntilNextOrder) Avg_days
+FROM (
+        SELECT  OrderID,
+                CustomerID,
+                OrderDate CurrentDate,
+                LEAD(OrderDate) OVER(PARTITION BY CustomerID ORDER BY OrderDate) NextOrder,
+                DATEDIFF(DAY, OrderDate,LEAD(OrderDate) OVER(PARTITION BY CustomerID ORDER BY OrderDate)) DaysUntilNextOrder
+        FROM 
+            Sales.Orders
+)t
+GROUP BY
+    CustomerID
+
+SELECT *, HighestValue1 - LowestValue1 
+FROM
+    (SELECT 
+        OrderID,
+        ProductID,
+        Sales,
+        FIRST_VALUE(Sales) OVER(PARTITION BY ProductID ORDER BY Sales) LowestValue1,
+        MIN(Sales) OVER(PARTITION BY ProductID) LowestValue2,
+        LAST_VALUE(Sales) OVER(PARTITION BY ProductID ORDER BY Sales ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING) HighestValue1,
+        MAX(Sales) OVER(PARTITION BY ProductID) HighestValue2
+    FROM Sales.Orders) t
