@@ -1,14 +1,1 @@
-DROP PROCEDURE IF EXISTS none;
-
-
-GO
-CREATE PROCEDURE none
-AS
-BEGIN
-    SELECT *
-    FROM   sales.Customers;
-END
-
-
-GO
-EXECUTE none ;
+--INDEXES
