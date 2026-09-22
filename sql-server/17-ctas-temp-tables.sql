@@ -1,3 +1,4 @@
+-- PERMANENT TABLE
 IF OBJECT_ID('Sales.MonthlyOrders', 'U') IS NOT NULL
     DROP TABLE Sales.MonthlyOrders;
 
@@ -9,3 +10,14 @@ GROUP BY DATENAME(MONTH, OrderDate);
 
 SELECT *
 FROM   Sales.MonthlyOrders;
+
+-- TEMPORARY TABLE
+SELECT *
+INTO   #Orders
+FROM   Sales.Orders;
+
+SELECT *
+FROM   #Orders;
+
+DELETE #Orders
+WHERE  OrderStatus = 'Delivered';
