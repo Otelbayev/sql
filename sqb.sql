@@ -1,0 +1,84 @@
+-- CREATE DATABASE SQB;
+-- CREATE TABLE employee (
+--     id         INT          PRIMARY KEY,
+--     first_name VARCHAR (60),
+--     last_name  VARCHAR (60)
+-- );
+-- CREATE TABLE rooms (
+--     id          INT          PRIMARY KEY,
+--     room_number VARCHAR (60)
+-- );
+-- CREATE TABLE seat (
+--     id          INT          PRIMARY KEY,
+--     order_place VARCHAR (60),
+--     room_id     INT         ,
+--     FOREIGN KEY (room_id) REFERENCES rooms (id)
+-- );
+-- CREATE TABLE employee_seat (
+--     employee_id INT,
+--     seat_id     INT UNIQUE,
+--     PRIMARY KEY (employee_id, seat_id),
+--     FOREIGN KEY (employee_id) REFERENCES employee (id),
+--     FOREIGN KEY (seat_id) REFERENCES seat (id)
+-- );
+-- INSERT  INTO rooms (
+--     id,
+--     room_number
+-- )
+-- VALUES            (1, '101'),
+-- (2, '102'),
+-- (3, '103');
+-- INSERT  INTO seat (
+--     id,
+--     order_place,
+--     room_id
+-- )
+-- VALUES           (1, '1', 1),
+-- (2, '2', 1),
+-- (3, '3', 1),
+-- (4, '4', 1),
+-- (5, '5', 1),
+-- (6, '1', 2),
+-- (7, '2', 2),
+-- (8, '3', 2),
+-- (9, '4', 2),
+-- (10, '1', 3),
+-- (11, '2', 3),
+-- (12, '3', 3),
+-- (13, '4', 3);
+-- INSERT  INTO employee (
+--     id,
+--     first_name,
+--     last_name
+-- )
+-- VALUES               (1, 'Ali', 'Valiyev'),
+-- (2, 'Vali', 'Aliyev'),
+-- (3, 'Jasur', 'Karimov'),
+-- (4, 'Sardor', 'Usmonov'),
+-- (5, 'Akmal', 'Rahimov');
+-- INSERT  INTO employee_seat (
+--     employee_id,
+--     seat_id
+-- )
+-- VALUES                    (1, 1),
+-- (2, 2),
+-- (3, 6),
+-- (4, 8),
+-- (5, 10);
+-- SELECT *
+-- FROM   employee;
+-- SELECT *
+-- FROM   rooms;
+-- SELECT *
+-- FROM   seat;
+-- SELECT *
+-- FROM   employee_seat;
+-- -- qaysi xonada necha bo'sh o'rinlar borligini topish kerak
+-- SELECT   room_id,
+--          COUNT(*)
+-- FROM     seat AS s
+--          LEFT OUTER JOIN
+--          employee_seat AS es
+--          ON s.id = es.seat_id
+-- WHERE    es.seat_id IS NULL
+-- GROUP BY room_id;
