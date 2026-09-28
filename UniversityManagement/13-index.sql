@@ -1,0 +1,6 @@
+-- 1. Students jadvalidagi primary key orqali yaratilgan indexni tekshir.
+-- 2. Ko‘p qidiriladigan ustunlarni aniqlab, ularga nonclustered index yarat.
+-- 3. Group bo‘yicha student qidirish uchun mos index yarat.
+-- 4. Baholarni student va subject bo‘yicha qidirish uchun composite index yaratishni sinab ko‘r.
+-- 5. Index yaratishdan oldin va keyin execution plan’ni solishtir.
+-- 6. Keraksiz yoki foyda bermayotgan indexlar haqida xulosa qil.

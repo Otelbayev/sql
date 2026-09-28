@@ -1,0 +1,5 @@
+-- 1. Yangi student yaratish va uni group hamda subjectlarga biriktirishni bitta transaction ichida bajar.
+-- 2. Jarayonning o‘rtasida xato yuz bersa barcha o‘zgarishlarni rollback qil.
+-- 3. TRY/CATCH yordamida xatoni boshqar.
+-- 4. Transaction muvaffaqiyatli bo‘lsa commit qil.
+-- 5. Ataylab xato holat yaratib rollback ishlayotganini tekshir.
